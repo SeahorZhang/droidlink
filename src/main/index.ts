@@ -12,7 +12,6 @@ import fs from 'fs'
 let scrcpyProcess: ChildProcess | null = null
 let bonjour: Bonjour | null = null
 const appCache = new Map<string, { data: { packageName: string; label: string; icon: string }[]; ts: number; version?: string }>()
-const APP_CACHE_TTL = 5 * 60 * 1000
 let pairingState: 'idle' | 'waiting' | 'pairing' | 'success' | 'error' = 'idle'
 let pairingMsg = ''
 
@@ -21,9 +20,26 @@ const COMPANION_PORT = 9527
 const COMPANION_VERSION = '1.0' // 与 companion-app build.gradle 中的 versionName 保持一致
 const iconDir = join(app.getPath('userData'), 'app-icons')
 const clickHistoryPath = join(app.getPath('userData'), 'app-clicks.json')
+const appCachePath = join(app.getPath('userData'), 'app-cache.json')
 
 function getIconPath(pkg: string): string {
   return join(iconDir, `${pkg.replace(/[/\\:]/g, '_')}.png`)
+}
+
+function loadAppCache(): void {
+  try {
+    const raw = fs.readFileSync(appCachePath, 'utf-8')
+    const entries = JSON.parse(raw) as [string, { data: { packageName: string; label: string; icon: string }[]; ts: number; version?: string }][]
+    for (const [key, val] of entries) {
+      appCache.set(key, val)
+    }
+  } catch {}
+}
+
+function saveAppCache(): void {
+  try {
+    fs.writeFileSync(appCachePath, JSON.stringify([...appCache]), 'utf-8')
+  } catch {}
 }
 
 function isValidImageBuffer(data: Buffer): boolean {
@@ -189,6 +205,21 @@ async function installCompanion(serial: string): Promise<boolean> {
       encoding: 'utf-8',
       timeout: 30000
     })
+    // MIUI/HyperOS 需要额外授权查询已安装应用
+    try {
+      execFileSync(getAdbPath(), ['-s', serial, 'shell', 'appops', 'set', COMPANION_PKG, 'QUERY_ALL_PACKAGES', 'allow'], {
+        encoding: 'utf-8', timeout: 5000
+      })
+      execFileSync(getAdbPath(), ['-s', serial, 'shell', 'appops', 'set', COMPANION_PKG, '10022', 'allow'], {
+        encoding: 'utf-8', timeout: 5000
+      })
+      execFileSync(getAdbPath(), ['-s', serial, 'shell', 'appops', 'set', COMPANION_PKG, '10004', 'allow'], {
+        encoding: 'utf-8', timeout: 5000
+      })
+      execFileSync(getAdbPath(), ['-s', serial, 'shell', 'appops', 'set', COMPANION_PKG, '10021', 'allow'], {
+        encoding: 'utf-8', timeout: 5000
+      })
+    } catch {}
     return true
   } catch (e) {
     console.error('[companion] install failed:', e)
@@ -431,29 +462,39 @@ app.whenReady().then(() => {
     }
   }
 
+  loadAppCache()
+
   ipcMain.handle('list-devices', async () => {
     try {
       const stdout = await runAdb(['devices', '-l'])
+      console.log('[devices] raw:', stdout.trim())
       const devices: {
         serial: string
         model: string
         type: 'usb' | 'wireless'
       }[] = []
       for (const line of stdout.split('\n')) {
-        const match = line.match(/^(\S+)\s+device\b/)
-        if (match) {
-          const serial = match[1]
-          const modelMatch = line.match(/model:(\S+)/)
-          const model = modelMatch ? modelMatch[1] : serial
-          devices.push({
-            serial,
-            model,
-            type: serial.includes(':') || serial.includes('_tcp') ? 'wireless' : 'usb'
-          })
-        }
+        // adb devices -l 格式: "serial device product:xxx model:xxx ..."
+        // 序列号可能含空格，用 " device " 分割
+        const deviceIdx = line.indexOf(' device ')
+        if (deviceIdx === -1) continue
+        const serial = line.substring(0, deviceIdx).trim()
+        if (!serial) continue
+        const rest = line.substring(deviceIdx)
+        if (!/^\s*device\b/.test(rest)) continue
+        const modelMatch = rest.match(/model:(\S+)/)
+        const model = modelMatch ? modelMatch[1] : serial
+        devices.push({
+          serial,
+          model,
+          type: serial.includes(':') || serial.includes('_tcp') ? 'wireless' : 'usb'
+        })
       }
-      return devices.filter((d, i, arr) => arr.findIndex((a) => a.model === d.model) === i)
-    } catch {
+      const result = devices.filter((d, i, arr) => arr.findIndex((a) => a.model === d.model) === i)
+      console.log('[devices] parsed:', result)
+      return result
+    } catch (e) {
+      console.log('[devices] error:', e)
       return []
     }
   })
@@ -471,7 +512,11 @@ app.whenReady().then(() => {
     }
 
     // kill-server 清除残留状态，pair 会自动启动干净的 server
-    try { execFileSync(getAdbPath(), ['kill-server'], { timeout: 3000 }) } catch {}
+    try {
+      execFileSync(getAdbPath(), ['kill-server'], { timeout: 3000 })
+      // 等待端口释放
+      await new Promise((r) => setTimeout(r, 500))
+    } catch {}
 
     const password = randomInt(100000, 999999).toString()
     const ssid = `d${randomInt(100000, 999999)}`
@@ -505,7 +550,7 @@ app.whenReady().then(() => {
       proc.on('close', (code) => {
         console.log('[pair] exit:', code)
         pairingState = code === 0 ? 'success' : 'error'
-        pairingMsg = code === 0 ? '连接成功！' : '配对失败'
+        pairingMsg = code === 0 ? '配对成功！' : '配对失败'
         stopBonjour()
       })
     })
@@ -579,8 +624,8 @@ app.whenReady().then(() => {
       syncIcons(packages)
     }
 
-    // 第三步：缓存命中且未过期，直接返回
-    if (!force && cached && Date.now() - cached.ts < APP_CACHE_TTL) {
+    // 第三步：缓存命中，直接返回
+    if (!force && cached) {
       return { apps: sortAppsByClick(merged), version: cached.version || '' }
     }
 
@@ -624,6 +669,7 @@ app.whenReady().then(() => {
       icon: oldMap.get(a.packageName)?.icon || ''
     }))
     appCache.set(serial, { data: merged, ts: Date.now(), version })
+    saveAppCache()
     syncIcons(merged.map((a) => a.packageName))
     prefetchMissingIcons(serial, merged)
   }
@@ -657,7 +703,7 @@ app.whenReady().then(() => {
     return ''
   })
 
-  ipcMain.handle('reinstall-companion', async (_e, serial: string) => {
+  ipcMain.handle('install-companion', async (_e, serial: string) => {
     try {
       const ok = await installCompanion(serial)
       if (ok) {
@@ -671,6 +717,24 @@ app.whenReady().then(() => {
     } catch {
       return { success: false }
     }
+  })
+
+  ipcMain.handle('uninstall-companion', async (_e, serial: string) => {
+    try {
+      execFileSync(getAdbPath(), ['-s', serial, 'shell', 'pm', 'uninstall', COMPANION_PKG], {
+        encoding: 'utf-8',
+        timeout: 10000
+      })
+      return { success: true }
+    } catch {
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('clear-app-cache', async (_e, serial: string) => {
+    appCache.delete(serial)
+    saveAppCache()
+    return { success: true }
   })
 
   ipcMain.handle('launch-app', async (_e, serial: string, packageName: string) => {

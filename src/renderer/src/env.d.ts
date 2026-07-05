@@ -20,7 +20,9 @@ interface Api {
   listApps: (serial: string, force?: boolean) => Promise<{ apps: { packageName: string; label: string; icon?: string }[]; version: string }>
   getAppIcon: (serial: string, apkPath: string) => Promise<string | null>
   launchApp: (serial: string, packageName: string) => Promise<{ success: boolean }>
-  reinstallCompanion: (serial: string) => Promise<{ success: boolean }>
+  installCompanion: (serial: string) => Promise<{ success: boolean }>
+  uninstallCompanion: (serial: string) => Promise<{ success: boolean }>
+  clearAppCache: (serial: string) => Promise<{ success: boolean }>
 }
 
 declare global {

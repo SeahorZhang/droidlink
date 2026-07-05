@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import DeviceList from './components/DeviceList.vue'
 import PairingQr from './components/PairingQr.vue'
 import AppList from './components/AppList.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 
 interface Device {
   serial: string
@@ -59,20 +60,11 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 let pairStatusTimer: ReturnType<typeof setInterval> | null = null
 let qrExpireTimer: ReturnType<typeof setTimeout> | null = null
 const qrExpired = ref(false)
-const showAppList = ref(false)
+
+const showAppList = ref(true)
 
 const hasDevice = computed(() => devices.value.length > 0)
 const showPairing = computed(() => !hasDevice.value || showQr.value)
-const windowWidth = computed(() => {
-  let w = 640 // DeviceList 600 + padding
-  if (showPairing.value) w += 440 // PairingQr 400 + gap
-  if (showAppList.value) w = Math.max(w, 640)
-  return w
-})
-
-watch(windowWidth, (w) => {
-  window.api.resizeWindow(w, 720)
-})
 
 const refreshDevices = async (showLoading = false): Promise<void> => {
   if (showLoading) isLoading.value = true
@@ -149,10 +141,19 @@ const generateQr = async (): Promise<void> => {
         if (pairStatusTimer) clearInterval(pairStatusTimer)
         if (qrExpireTimer) clearTimeout(qrExpireTimer)
         if (status.state === 'success') {
-          setTimeout(async () => {
-            await refreshDevices()
-            if (devices.value.length > 0) showQr.value = false
-          }, 1000)
+          const waitForDevice = async (retries = 15): Promise<void> => {
+            for (let i = 0; i < retries; i++) {
+              await new Promise((r) => setTimeout(r, 1000))
+              await refreshDevices()
+              if (devices.value.length > 0) {
+                showQr.value = false
+                return
+              }
+            }
+            // 超时也关闭，避免卡死
+            showQr.value = false
+          }
+          waitForDevice()
         }
       }
     }, 1000)
@@ -172,10 +173,11 @@ const stopScrcpy = async (): Promise<void> => {
 const disconnectWireless = async (serial: string): Promise<void> => {
   await window.api.disconnectDevice(serial)
   await refreshDevices()
-  if (devices.value.length === 0) showQr.value = false
+  if (devices.value.length === 0) generateQr()
 }
 
 onMounted(async () => {
+  window.api.resizeWindow(1040, 720)
   await refreshDevices()
   if (devices.value.length === 0) generateQr()
   refreshTimer = setInterval(async () => {
@@ -199,41 +201,38 @@ onUnmounted(() => {
     <div class="traffic-light-pad"></div>
     <div class="flex gap-5 items-start">
       <div>
-        <DeviceList
-          v-if="hasDevice"
-          :devices="devices"
-          :is-loading="isLoading"
-          :is-scrcpy-running="isScrcpyRunning"
-          :settings="scrcpySettings"
-          @refresh="() => refreshDevices(true)"
-          @start-scrcpy="startScrcpy"
-          @stop-scrcpy="stopScrcpy"
-          @disconnect="disconnectWireless"
-          @pair-new="showQr = true"
-          @show-app-list="showAppList = !showAppList"
-          @update:settings="(s) => (scrcpySettings = s)"
-        />
-        <AppList
-          v-if="showAppList && hasDevice"
-          :serial="devices[0]?.serial || ''"
-          @close="showAppList = false"
-        />
+        <DeviceList v-if="hasDevice" :devices="devices" :is-loading="isLoading" :is-scrcpy-running="isScrcpyRunning"
+          :settings="scrcpySettings" @refresh="() => refreshDevices(true)" @start-scrcpy="startScrcpy"
+          @stop-scrcpy="stopScrcpy" @disconnect="disconnectWireless" @pair-new="showQr = true"
+          @update:settings="(s) => (scrcpySettings = s)" />
       </div>
-      <PairingQr
-        v-if="!hasDevice || showQr"
-        :qr-data-url="qrDataUrl"
-        :qr-ready="qrReady"
-        :qr-expired="qrExpired"
-        :pair-state="pairState"
-        :has-device="hasDevice"
-        @generate-qr="generateQr"
-        @close="showQr = false"
-      />
+      <div class="flex flex-col">
+        <PairingQr v-if="!hasDevice || showQr" :qr-data-url="qrDataUrl" :qr-ready="qrReady" :qr-expired="qrExpired"
+          :pair-state="pairState" :has-device="hasDevice" @generate-qr="generateQr" @close="showQr = false" />
+        <template v-if="hasDevice">
+          <div
+            class="w-[520px] backdrop-blur-xl bg-white/[0.06] rounded-3xl border border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.4)] flex flex-col">
+            <div class="flex items-center h-10 border-b border-white/[0.06] box-border">
+              <button v-for="tab in [{ key: 'appList', label: '应用列表' }, { key: 'settings', label: '设置' }]"
+                :key="tab.key" :class="[
+                  ' px-5 text-[11px] font-medium uppercase tracking-wider transition-colors cursor-pointer h-full flex items-center justify-center',
+                  showAppList === (tab.key === 'appList')
+                    ? 'text-white/60 border-b-2 border-white/20'
+                    : 'text-white/25 hover:text-white/40'
+                ]" @click="showAppList = tab.key === 'appList'">
+                {{ tab.label }}
+              </button>
+            </div>
+            <div class="h-[520px] p-5 space-y-4 flex flex-col">
+              <AppList v-show="showAppList" :serial="devices[0]?.serial || ''" />
+              <SettingsPanel v-show="!showAppList" :settings="scrcpySettings" @update:settings="(s) => (scrcpySettings = s)" />
+            </div>
+          </div>
+        </template>
+      </div>
     </div>
 
-    <div
-      class="fixed bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 text-[11px] text-white/15"
-    >
+    <div class="fixed bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 text-[11px] text-white/15">
       <span class="w-1.5 h-1.5 bg-emerald-500/60 rounded-full"></span>ADB 就绪
     </div>
   </div>

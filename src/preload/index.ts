@@ -44,8 +44,12 @@ const api = {
     ipcRenderer.invoke('get-app-icon', serial, packageName),
   launchApp: (serial: string, packageName: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('launch-app', serial, packageName),
-  reinstallCompanion: (serial: string): Promise<{ success: boolean }> =>
-    ipcRenderer.invoke('reinstall-companion', serial),
+  installCompanion: (serial: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('install-companion', serial),
+  uninstallCompanion: (serial: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('uninstall-companion', serial),
+  clearAppCache: (serial: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('clear-app-cache', serial),
   resizeWindow: (width: number, height: number): void => {
     ipcRenderer.send('resize-window', width, height)
   }
