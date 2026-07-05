@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.anddrive.companion'
+    namespace 'com.droidlink.companion'
     compileSdk 34
 
     defaultConfig {
-        applicationId 'com.anddrive.companion'
+        applicationId 'com.droidlink.companion'
         minSdk 24
         targetSdk 34
         versionCode 11

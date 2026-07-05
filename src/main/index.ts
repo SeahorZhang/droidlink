@@ -15,7 +15,7 @@ const appCache = new Map<string, { data: { packageName: string; label: string; i
 let pairingState: 'idle' | 'waiting' | 'pairing' | 'success' | 'error' = 'idle'
 let pairingMsg = ''
 
-const COMPANION_PKG = 'com.anddrive.companion'
+const COMPANION_PKG = 'com.droidlink.companion'
 const COMPANION_PORT = 9527
 const COMPANION_VERSION = '1.0' // 与 companion-app build.gradle 中的 versionName 保持一致
 const iconDir = join(app.getPath('userData'), 'app-icons')

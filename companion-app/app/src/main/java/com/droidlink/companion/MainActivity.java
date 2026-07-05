@@ -1,4 +1,4 @@
-package com.anddrive.companion;
+package com.droidlink.companion;
 
 import android.app.Activity;
 import android.content.pm.ApplicationInfo;
@@ -25,7 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
-    private static final String TAG = "AndDrive";
+    private static final String TAG = "DroidLink";
     private static final int PORT = 9527;
     private ServerSocket serverSocket;
     private final ExecutorService executor = Executors.newCachedThreadPool();

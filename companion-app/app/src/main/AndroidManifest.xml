@@ -9,7 +9,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="AndDrive">
+        android:label="DroidLink">
 
         <activity
             android:name=".MainActivity"
