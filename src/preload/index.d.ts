@@ -37,9 +37,10 @@ interface Api {
   listApps: (
     serial: string,
     force?: boolean
-  ) => Promise<{ packageName: string; label: string; icon?: string }[]>
+  ) => Promise<{ apps: { packageName: string; label: string; icon?: string }[]; version: string }>
   getAppIcon: (serial: string, packageName: string) => Promise<string>
   launchApp: (serial: string, packageName: string) => Promise<{ success: boolean }>
+  reinstallCompanion: (serial: string) => Promise<{ success: boolean }>
   resizeWindow: (width: number, height: number) => void
 }
 

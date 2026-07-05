@@ -17,9 +17,10 @@ interface Api {
   disconnectDevice: (serial: string) => Promise<{ success: boolean }>
   startScrcpy: (serial?: string) => Promise<boolean>
   stopScrcpy: () => Promise<boolean>
-  listApps: (serial: string) => Promise<{ packageName: string; label: string }[]>
+  listApps: (serial: string, force?: boolean) => Promise<{ apps: { packageName: string; label: string; icon?: string }[]; version: string }>
   getAppIcon: (serial: string, apkPath: string) => Promise<string | null>
   launchApp: (serial: string, packageName: string) => Promise<{ success: boolean }>
+  reinstallCompanion: (serial: string) => Promise<{ success: boolean }>
 }
 
 declare global {

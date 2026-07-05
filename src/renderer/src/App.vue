@@ -55,7 +55,6 @@ watch(
 const qrDataUrl = ref('')
 const qrReady = ref(false)
 const pairState = ref<string>('idle')
-const pairMsg = ref('')
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 let pairStatusTimer: ReturnType<typeof setInterval> | null = null
 let qrExpireTimer: ReturnType<typeof setTimeout> | null = null
@@ -96,6 +95,8 @@ const refreshDevices = async (showLoading = false): Promise<void> => {
     if (!oldMap.has(d.serial)) {
       const newDevice: Device = {
         ...d,
+        battery: -1,
+        storage: '',
         androidVersion: '',
         screenSize: '',
         ipAddress: '',
@@ -128,7 +129,6 @@ const generateQr = async (): Promise<void> => {
   qrReady.value = false
   qrExpired.value = false
   pairState.value = 'idle'
-  pairMsg.value = ''
   showQr.value = true
   if (qrExpireTimer) clearTimeout(qrExpireTimer)
   const result = await window.api.generatePairingQr()
@@ -136,17 +136,15 @@ const generateQr = async (): Promise<void> => {
     qrDataUrl.value = result.qrDataUrl
     qrReady.value = true
     pairState.value = 'waiting'
-    pairMsg.value = '等待手机扫码...'
 
     qrExpireTimer = setTimeout(() => {
       qrExpired.value = true
-    }, 20000)
+    }, 300000)
 
     if (pairStatusTimer) clearInterval(pairStatusTimer)
     pairStatusTimer = setInterval(async () => {
       const status = await window.api.getPairingStatus()
       pairState.value = status.state
-      pairMsg.value = status.message
       if (status.state === 'success' || status.state === 'error') {
         if (pairStatusTimer) clearInterval(pairStatusTimer)
         if (qrExpireTimer) clearTimeout(qrExpireTimer)
@@ -186,12 +184,6 @@ onMounted(async () => {
   window.api.onScrcpyStopped(() => {
     isScrcpyRunning.value = false
   })
-})
-
-onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
-  if (pairStatusTimer) clearInterval(pairStatusTimer)
-  if (qrExpireTimer) clearTimeout(qrExpireTimer)
 })
 
 onUnmounted(() => {

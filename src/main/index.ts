@@ -11,13 +11,14 @@ import fs from 'fs'
 
 let scrcpyProcess: ChildProcess | null = null
 let bonjour: Bonjour | null = null
-const appCache = new Map<string, { data: { packageName: string; label: string }[]; ts: number }>()
+const appCache = new Map<string, { data: { packageName: string; label: string; icon: string }[]; ts: number; version?: string }>()
 const APP_CACHE_TTL = 5 * 60 * 1000
 let pairingState: 'idle' | 'waiting' | 'pairing' | 'success' | 'error' = 'idle'
 let pairingMsg = ''
 
 const COMPANION_PKG = 'com.anddrive.companion'
 const COMPANION_PORT = 9527
+const COMPANION_VERSION = '1.0' // 与 companion-app build.gradle 中的 versionName 保持一致
 const iconDir = join(app.getPath('userData'), 'app-icons')
 const clickHistoryPath = join(app.getPath('userData'), 'app-clicks.json')
 
@@ -25,9 +26,17 @@ function getIconPath(pkg: string): string {
   return join(iconDir, `${pkg.replace(/[/\\:]/g, '_')}.png`)
 }
 
-function loadIconFromDisk(pkg: string): string | '' {
+function isValidImageBuffer(data: Buffer): boolean {
+  if (data.length < 8) return false
+  const isPng = data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
+  const isJpeg = data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff
+  return isPng || isJpeg
+}
+
+function loadIconFromDisk(pkg: string): string {
   try {
     const data = fs.readFileSync(getIconPath(pkg))
+    if (!isValidImageBuffer(data)) return ''
     return data.toString('base64')
   } catch {
     return ''
@@ -36,8 +45,11 @@ function loadIconFromDisk(pkg: string): string | '' {
 
 function saveIconToDisk(pkg: string, b64: string): void {
   try {
+    if (!b64 || b64.length < 100) return
+    const buf = Buffer.from(b64, 'base64')
+    if (!isValidImageBuffer(buf)) return
     if (!fs.existsSync(iconDir)) fs.mkdirSync(iconDir, { recursive: true })
-    fs.writeFileSync(getIconPath(pkg), Buffer.from(b64, 'base64'))
+    fs.writeFileSync(getIconPath(pkg), buf)
   } catch {
     /* ok */
   }
@@ -48,9 +60,17 @@ function syncIcons(packageNames: string[]): void {
     if (!fs.existsSync(iconDir)) return
     const pkgSet = new Set(packageNames)
     for (const file of fs.readdirSync(iconDir)) {
-      const pkg = file.replace('.png', '').replace(/_/g, '/')
-      if (!pkgSet.has(pkg)) {
-        fs.unlinkSync(join(iconDir, file))
+      const filePath = join(iconDir, file)
+      try {
+        const pkg = file.replace('.png', '').replace(/_/g, '/')
+        if (!pkgSet.has(pkg)) {
+          fs.unlinkSync(filePath)
+          continue
+        }
+        const data = fs.readFileSync(filePath)
+        if (!isValidImageBuffer(data)) fs.unlinkSync(filePath)
+      } catch {
+        /* ok */
       }
     }
   } catch {
@@ -63,25 +83,37 @@ function prefetchMissingIcons(serial: string, apps: { packageName: string }[]): 
   const missing = apps.filter((a) => !loadIconFromDisk(a.packageName)).slice(0, 20)
   if (missing.length === 0) return
 
-  execFileSync(
-    getAdbPath(),
-    ['-s', serial, 'forward', `tcp:${COMPANION_PORT}`, `tcp:${COMPANION_PORT}`],
-    {
-      encoding: 'utf-8',
-      timeout: 5000
-    }
-  )
+  try {
+    execFileSync(
+      getAdbPath(),
+      ['-s', serial, 'forward', `tcp:${COMPANION_PORT}`, `tcp:${COMPANION_PORT}`],
+      {
+        encoding: 'utf-8',
+        timeout: 5000
+      }
+    )
+  } catch {
+    return
+  }
 
-  for (const app of missing) {
+  // 逐个请求避免并发过多
+  let i = 0
+  const fetchNext = (): void => {
+    if (i >= missing.length) return
+    const app = missing[i++]
     httpGet(
       `http://127.0.0.1:${COMPANION_PORT}/icon?pkg=${encodeURIComponent(app.packageName)}`,
       5000
     )
       .then((b64) => {
         if (b64) saveIconToDisk(app.packageName, b64)
+        fetchNext()
       })
-      .catch(() => {})
+      .catch(() => {
+        fetchNext()
+      })
   }
+  fetchNext()
 }
 
 function loadClickHistory(): Map<string, number> {
@@ -181,43 +213,50 @@ function httpGet(url: string, timeoutMs = 10000): Promise<string> {
 
 async function fetchAppsViaCompanion(
   serial: string
-): Promise<{ packageName: string; label: string; icon?: string }[]> {
-  // 端口转发
-  console.log('[companion] forwarding port...')
-  execFileSync(
-    getAdbPath(),
-    ['-s', serial, 'forward', `tcp:${COMPANION_PORT}`, `tcp:${COMPANION_PORT}`],
-    {
-      encoding: 'utf-8',
-      timeout: 5000
+): Promise<{ apps: { packageName: string; label: string; icon: string }[]; version: string }> {
+  // 端口转发 + 启动 app 并行
+  const forwardPromise = new Promise<void>((resolve, reject) => {
+    execFile(
+      getAdbPath(),
+      ['-s', serial, 'forward', `tcp:${COMPANION_PORT}`, `tcp:${COMPANION_PORT}`],
+      { encoding: 'utf-8', timeout: 5000 },
+      (err) => (err ? reject(err) : resolve())
+    )
+  })
+  const startPromise = new Promise<void>((resolve, reject) => {
+    execFile(
+      getAdbPath(),
+      ['-s', serial, 'shell', 'am', 'start', '-n', `${COMPANION_PKG}/.MainActivity`],
+      { encoding: 'utf-8', timeout: 5000 },
+      (err) => (err ? reject(err) : resolve())
+    )
+  })
+  await Promise.all([forwardPromise, startPromise])
+
+  // 轮询等服务就绪（最多 2 秒）
+  for (let i = 0; i < 10; i++) {
+    try {
+      await httpGet(`http://127.0.0.1:${COMPANION_PORT}/ping`, 500)
+      break
+    } catch {
+      await new Promise((r) => setTimeout(r, 200))
     }
-  )
+  }
 
-  // 启动 companion app
-  console.log('[companion] starting app...')
-  execFileSync(
-    getAdbPath(),
-    ['-s', serial, 'shell', 'am', 'start', '-n', `${COMPANION_PKG}/.MainActivity`],
-    { encoding: 'utf-8', timeout: 5000 }
-  )
-
-  // 等服务启动
-  await new Promise((r) => setTimeout(r, 1000))
-
-  // 请求数据
-  console.log('[companion] fetching apps from http://127.0.0.1:' + COMPANION_PORT + '/apps')
+  // 请求数据（一次拿到应用列表 + 版本号）
   const json = await httpGet(`http://127.0.0.1:${COMPANION_PORT}/apps`, 30000)
-  console.log('[companion] response length:', json.length)
   const result = JSON.parse(json)
 
   if (result.error) throw new Error(result.error)
-  console.log('[companion] apps count:', result.count)
 
-  return result.apps.map((a: { packageName: string; label: string; icon?: string }) => ({
-    packageName: a.packageName,
-    label: a.label,
-    icon: a.icon || ''
-  }))
+  return {
+    apps: result.apps.map((a: { packageName: string; label: string; icon?: string }) => ({
+      packageName: a.packageName,
+      label: a.label,
+      icon: a.icon || ''
+    })),
+    version: result.version || ''
+  }
 }
 
 function runAdb(args: string[]): Promise<string> {
@@ -320,12 +359,40 @@ async function getDeviceInfo(serial: string): Promise<{
   }
 }
 
+async function getDeviceWindowTitle(serial: string): Promise<string> {
+  try {
+    const deviceInfo = await getDeviceInfo(serial)
+    return deviceInfo.deviceName || serial
+  } catch {
+    return serial
+  }
+}
+
+function spawnScrcpy(args: string[]): void {
+  if (scrcpyProcess) {
+    scrcpyProcess.kill('SIGKILL')
+    scrcpyProcess = null
+  }
+  console.log('[scrcpy] spawn:', getScrcpyPath(), args)
+  scrcpyProcess = spawn(getScrcpyPath(), args, { stdio: 'pipe' })
+  scrcpyProcess.stdout?.on('data', (data) => console.log('[scrcpy]', data.toString()))
+  scrcpyProcess.stderr?.on('data', (data) => console.log('[scrcpy]', data.toString()))
+  scrcpyProcess.on('error', (err) => {
+    console.log('[scrcpy] error:', err.message)
+    scrcpyProcess = null
+    BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
+  })
+  scrcpyProcess.on('close', () => {
+    scrcpyProcess = null
+    BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
+  })
+}
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 800,
     height: 720,
     minWidth: 300,
-    minHeight: 400,
     minHeight: 720,
     show: false,
     autoHideMenuBar: true,
@@ -352,6 +419,18 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
   app.on('browser-window-created', (_, w) => optimizer.watchWindowShortcuts(w))
 
+  // 启动时清理损坏的图标文件
+  if (fs.existsSync(iconDir)) {
+    for (const file of fs.readdirSync(iconDir)) {
+      try {
+        const data = fs.readFileSync(join(iconDir, file))
+        if (!isValidImageBuffer(data)) fs.unlinkSync(join(iconDir, file))
+      } catch {
+        /* ok */
+      }
+    }
+  }
+
   ipcMain.handle('list-devices', async () => {
     try {
       const stdout = await runAdb(['devices', '-l'])
@@ -359,8 +438,6 @@ app.whenReady().then(() => {
         serial: string
         model: string
         type: 'usb' | 'wireless'
-        battery: number
-        storage: string
       }[] = []
       for (const line of stdout.split('\n')) {
         const match = line.match(/^(\S+)\s+device\b/)
@@ -371,9 +448,7 @@ app.whenReady().then(() => {
           devices.push({
             serial,
             model,
-            type: serial.includes(':') || serial.includes('_tcp') ? 'wireless' : 'usb',
-            battery: -1,
-            storage: ''
+            type: serial.includes(':') || serial.includes('_tcp') ? 'wireless' : 'usb'
           })
         }
       }
@@ -395,6 +470,9 @@ app.whenReady().then(() => {
       bonjour = null
     }
 
+    // kill-server 清除残留状态，pair 会自动启动干净的 server
+    try { execFileSync(getAdbPath(), ['kill-server'], { timeout: 3000 }) } catch {}
+
     const password = randomInt(100000, 999999).toString()
     const ssid = `d${randomInt(100000, 999999)}`
     const qrContent = `WIFI:T:ADB;S:${ssid};P:${password};;`
@@ -405,8 +483,17 @@ app.whenReady().then(() => {
     pairingState = 'waiting'
     pairingMsg = '等待手机扫码...'
 
+    let pairingStarted = false
+    const stopBonjour = (): void => {
+      if (bonjour) {
+        bonjour.destroy()
+        bonjour = null
+      }
+    }
     bonjour.find({ type: 'adb-tls-pairing' }, (service) => {
       if (!service.referer) return
+      if (pairingStarted) return
+      pairingStarted = true
       pairingState = 'pairing'
       pairingMsg = '正在配对...'
       const target = `${service.referer.address}:${service.port}`
@@ -417,33 +504,9 @@ app.whenReady().then(() => {
       proc.stderr.on('data', (d) => console.log('[pair]', d.toString().trim()))
       proc.on('close', (code) => {
         console.log('[pair] exit:', code)
-        if (code === 0) {
-          pairingMsg = '配对成功，正在连接...'
-          bonjour?.find({ type: 'adb-tls-connect' }, (connectService) => {
-            if (!connectService.referer) return
-            const connectTarget = `${connectService.referer.address}:${connectService.port}`
-            console.log('[connect] found:', connectTarget)
-            const connectProc = spawn(getAdbPath(), ['connect', connectTarget])
-            connectProc.stdout.on('data', (d) => console.log('[connect]', d.toString().trim()))
-            connectProc.stderr.on('data', (d) => console.log('[connect]', d.toString().trim()))
-            connectProc.on('close', (connectCode) => {
-              console.log('[connect] exit:', connectCode)
-              pairingState = connectCode === 0 ? 'success' : 'error'
-              pairingMsg = connectCode === 0 ? '连接成功！' : '连接失败'
-              if (bonjour) {
-                bonjour.destroy()
-                bonjour = null
-              }
-            })
-          })
-        } else {
-          pairingState = 'error'
-          pairingMsg = '配对失败'
-          if (bonjour) {
-            bonjour.destroy()
-            bonjour = null
-          }
-        }
+        pairingState = code === 0 ? 'success' : 'error'
+        pairingMsg = code === 0 ? '连接成功！' : '配对失败'
+        stopBonjour()
       })
     })
 
@@ -464,44 +527,15 @@ app.whenReady().then(() => {
   ipcMain.handle(
     'start-scrcpy',
     async (_e, opts: { serial?: string; maxSize?: number; bitRate?: string }) => {
-      if (scrcpyProcess) {
-        scrcpyProcess.kill('SIGKILL')
-        scrcpyProcess = null
-      }
       const args: string[] = opts.serial ? ['-s', opts.serial] : []
       if (opts.bitRate) args.push('-b', opts.bitRate)
-      // 使用H.265编码，画质更好
       args.push('--video-codec', 'h265')
-      // 让scrcpy窗口始终在app上方
-      // args.push('--always-on-top')
-      // 设置窗口居中显示
       args.push('--window-x', 'auto')
       args.push('--window-y', 'auto')
-      // 获取设备型号并设置为窗口标题
       if (opts.serial) {
-        try {
-          const deviceInfo = await getDeviceInfo(opts.serial)
-          const windowTitle = deviceInfo.deviceName || opts.serial
-          args.push('--window-title', windowTitle)
-        } catch {
-          // 获取失败时使用序列号作为标题
-          args.push('--window-title', opts.serial)
-        }
+        args.push('--window-title', await getDeviceWindowTitle(opts.serial))
       }
-      console.log('[scrcpy] spawn:', getScrcpyPath(), args)
-      scrcpyProcess = spawn(getScrcpyPath(), args, { stdio: 'pipe' })
-      scrcpyProcess.stdout?.on('data', (data) => console.log('[scrcpy]', data.toString()))
-      scrcpyProcess.stderr?.on('data', (data) => console.log('[scrcpy]', data.toString()))
-      scrcpyProcess.on('error', (err) => {
-        console.log('[scrcpy] error:', err.message)
-        scrcpyProcess = null
-        BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
-      })
-      scrcpyProcess.on('close', (code) => {
-        console.log('[scrcpy] close:', code)
-        scrcpyProcess = null
-        BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
-      })
+      spawnScrcpy(args)
       return true
     }
   )
@@ -512,56 +546,87 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('list-apps', async (_e, serial: string, force?: boolean) => {
-    if (!force) {
-      const cached = appCache.get(serial)
-      if (cached && Date.now() - cached.ts < APP_CACHE_TTL) {
-        console.log('[list-apps] cache hit:', cached.data.length, 'apps')
-        return sortAppsByClick(cached.data)
-      }
-    }
-
-    // 优先用 companion app（快，有名称）
-    try {
-      const installed = await isCompanionInstalled(serial)
-      console.log('[list-apps] companion installed:', installed)
-      if (!installed) {
-        console.log('[list-apps] installing companion app...')
-        const ok = await installCompanion(serial)
-        console.log('[list-apps] install result:', ok)
-        if (!ok) throw new Error('install failed')
-      }
-      const data = await fetchAppsViaCompanion(serial)
-      console.log('[list-apps] sample:', JSON.stringify(data.slice(0, 3)))
-      // 同步图标缓存：删除旧的，补全缺失的
-      syncIcons(data.map((a) => a.packageName))
-      prefetchMissingIcons(serial, data)
-      appCache.set(serial, { data, ts: Date.now() })
-      return sortAppsByClick(data)
-    } catch (e) {
-      console.error('[list-apps] companion failed, fallback:', e)
-    }
-
-    // 回退：adb 命令（只有包名）
+    // 第一步：用 ADB 快速获取包名列表
+    let packages: string[] = []
     try {
       const output = execFileSync(
         getAdbPath(),
-        ['-s', serial, 'shell', 'cmd package list packages -3'],
-        { encoding: 'utf-8', timeout: 10000 }
+        ['-s', serial, 'shell', 'pm', 'list', 'packages', '-3'],
+        { encoding: 'utf-8', timeout: 5000 }
       )
-      const data = output
+      packages = output
         .split('\n')
         .filter((l) => l.startsWith('package:'))
         .map((l) => l.replace('package:', '').trim())
         .filter(Boolean)
-        .map((pkg) => ({ packageName: pkg, label: '' }))
-
-      console.log('[list-apps] fallback data:', data.length, 'apps')
-      appCache.set(serial, { data, ts: Date.now() })
-      return sortAppsByClick(data)
     } catch {
       return []
     }
+
+    // 第二步：合并缓存数据（图标 + 名称）
+    const cached = appCache.get(serial)
+    const cachedMap = new Map((cached?.data || []).map((d) => [d.packageName, d]))
+    const merged = packages.map((pkg) => ({
+      packageName: pkg,
+      label: cachedMap.get(pkg)?.label || '',
+      icon: cachedMap.get(pkg)?.icon || ''
+    }))
+
+    // 清理缓存中已不存在的包
+    if (cached) {
+      const pkgSet = new Set(packages)
+      cached.data = cached.data.filter((d) => pkgSet.has(d.packageName))
+      syncIcons(packages)
+    }
+
+    // 第三步：缓存命中且未过期，直接返回
+    if (!force && cached && Date.now() - cached.ts < APP_CACHE_TTL) {
+      return { apps: sortAppsByClick(merged), version: cached.version || '' }
+    }
+
+    // 缓存过期或强制刷新，同步等待 companion 数据
+    try {
+      const installed = await isCompanionInstalled(serial)
+      if (!installed) await installCompanion(serial)
+
+      const result = await fetchAppsViaCompanion(serial)
+      if (result.version && result.version !== COMPANION_VERSION) {
+        await installCompanion(serial)
+        const retry = await fetchAppsViaCompanion(serial)
+        updateCache(serial, retry.apps, retry.version)
+      } else {
+        updateCache(serial, result.apps, result.version)
+      }
+    } catch (e) {
+      console.error('[list-apps] companion fetch failed:', e)
+    }
+
+    // 用更新后的缓存重新构建返回数据
+    const updatedCached = appCache.get(serial)
+    if (updatedCached) {
+      const updatedMap = new Map(updatedCached.data.map((d) => [d.packageName, d]))
+      const updated = packages.map((pkg) => ({
+        packageName: pkg,
+        label: updatedMap.get(pkg)?.label || '',
+        icon: updatedMap.get(pkg)?.icon || ''
+      }))
+      return { apps: sortAppsByClick(updated), version: updatedCached.version || '' }
+    }
+    return { apps: sortAppsByClick(merged), version: '' }
   })
+
+  function updateCache(serial: string, apps: { packageName: string; label: string; icon?: string }[], version?: string): void {
+    const old = appCache.get(serial)
+    const oldMap = new Map((old?.data || []).map((d) => [d.packageName, d]))
+    // 保留旧的图标，补全新的
+    const merged = apps.map((a) => ({
+      ...a,
+      icon: oldMap.get(a.packageName)?.icon || ''
+    }))
+    appCache.set(serial, { data: merged, ts: Date.now(), version })
+    syncIcons(merged.map((a) => a.packageName))
+    prefetchMissingIcons(serial, merged)
+  }
 
   ipcMain.handle('get-app-icon', async (_e, serial: string, packageName: string) => {
     // 先从磁盘读取
@@ -582,7 +647,7 @@ app.whenReady().then(() => {
         `http://127.0.0.1:${COMPANION_PORT}/icon?pkg=${encodeURIComponent(packageName)}`,
         5000
       )
-      if (b64) {
+      if (b64 && b64.length > 100) {
         saveIconToDisk(packageName, b64)
         return b64
       }
@@ -592,47 +657,41 @@ app.whenReady().then(() => {
     return ''
   })
 
+  ipcMain.handle('reinstall-companion', async (_e, serial: string) => {
+    try {
+      const ok = await installCompanion(serial)
+      if (ok) {
+        execFile(
+          getAdbPath(),
+          ['-s', serial, 'shell', 'am', 'start', '-n', `${COMPANION_PKG}/.MainActivity`],
+          { encoding: 'utf-8', timeout: 5000 }
+        )
+      }
+      return { success: ok }
+    } catch {
+      return { success: false }
+    }
+  })
+
   ipcMain.handle('launch-app', async (_e, serial: string, packageName: string) => {
     // 记录点击历史
     const history = loadClickHistory()
     history.set(packageName, Date.now())
     saveClickHistory(history)
 
-    try {
-      if (scrcpyProcess) {
-        scrcpyProcess.kill('SIGKILL')
-        scrcpyProcess = null
-      }
-      const args: string[] = []
-      if (serial) args.push('-s', serial)
-      args.push('--new-display=1920x1080/320')
-      args.push('--start-app', packageName)
-      args.push('--video-codec', 'h265')
-      args.push('--video-bit-rate', '24M')
-      args.push('--window-x', 'auto')
-      args.push('--window-y', 'auto')
-      if (serial) {
-        try {
-          const deviceInfo = await getDeviceInfo(serial)
-          args.push('--window-title', deviceInfo.deviceName || serial)
-        } catch {
-          args.push('--window-title', serial)
-        }
-      }
-      scrcpyProcess = spawn(getScrcpyPath(), args, { stdio: 'pipe' })
-      scrcpyProcess.on('error', (err) => {
-        console.log('[scrcpy] error:', err.message)
-        scrcpyProcess = null
-        BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
-      })
-      scrcpyProcess.on('close', () => {
-        scrcpyProcess = null
-        BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
-      })
-      return { success: true }
-    } catch {
-      return { success: false }
+    const args: string[] = []
+    if (serial) args.push('-s', serial)
+    args.push('--new-display=1920x1080/320')
+    args.push('--start-app', packageName)
+    args.push('--video-codec', 'h265')
+    args.push('--video-bit-rate', '24M')
+    args.push('--window-x', 'auto')
+    args.push('--window-y', 'auto')
+    if (serial) {
+      args.push('--window-title', await getDeviceWindowTitle(serial))
     }
+    spawnScrcpy(args)
+    return { success: true }
   })
 
   ipcMain.on('resize-window', (_e, width: number, height: number) => {

@@ -3,7 +3,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
   listDevices: (): Promise<
-    { serial: string; model: string; type: 'usb' | 'wireless'; battery: number; storage: string }[]
+    { serial: string; model: string; type: 'usb' | 'wireless' }[]
   > => ipcRenderer.invoke('list-devices'),
   getDeviceInfo: (
     serial: string
@@ -38,12 +38,14 @@ const api = {
   listApps: (
     serial: string,
     force?: boolean
-  ): Promise<{ packageName: string; label: string; icon?: string }[]> =>
+  ): Promise<{ apps: { packageName: string; label: string; icon?: string }[]; version: string }> =>
     ipcRenderer.invoke('list-apps', serial, force),
   getAppIcon: (serial: string, packageName: string): Promise<string> =>
     ipcRenderer.invoke('get-app-icon', serial, packageName),
   launchApp: (serial: string, packageName: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('launch-app', serial, packageName),
+  reinstallCompanion: (serial: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('reinstall-companion', serial),
   resizeWindow: (width: number, height: number): void => {
     ipcRenderer.send('resize-window', width, height)
   }
