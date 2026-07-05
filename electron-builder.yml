@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: anddrive
+appId: com.droidlink.app
+productName: DroidLink
 directories:
   buildResources: build
 files:
@@ -16,7 +16,7 @@ asarUnpack:
   - resources/**
 compression: maximum
 mac:
-  executableName: anddrive
+  executableName: DroidLink
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     - NSCameraUsageDescription: Application requests access to the device's camera.
@@ -29,7 +29,7 @@ mac:
 dmg:
   artifactName: ${name}-${version}.${ext}
 win:
-  executableName: anddrive
+  executableName: DroidLink
   target:
     - nsis
 nsis:
