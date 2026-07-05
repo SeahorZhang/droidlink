@@ -40,7 +40,9 @@ interface Api {
   ) => Promise<{ apps: { packageName: string; label: string; icon?: string }[]; version: string }>
   getAppIcon: (serial: string, packageName: string) => Promise<string>
   launchApp: (serial: string, packageName: string) => Promise<{ success: boolean }>
-  reinstallCompanion: (serial: string) => Promise<{ success: boolean }>
+  installCompanion: (serial: string) => Promise<{ success: boolean }>
+  uninstallCompanion: (serial: string) => Promise<{ success: boolean }>
+  clearAppCache: (serial: string) => Promise<{ success: boolean }>
   resizeWindow: (width: number, height: number) => void
 }
 

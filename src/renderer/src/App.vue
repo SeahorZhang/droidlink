@@ -64,7 +64,6 @@ const qrExpired = ref(false)
 const showAppList = ref(true)
 
 const hasDevice = computed(() => devices.value.length > 0)
-const showPairing = computed(() => !hasDevice.value || showQr.value)
 
 const refreshDevices = async (showLoading = false): Promise<void> => {
   if (showLoading) isLoading.value = true
