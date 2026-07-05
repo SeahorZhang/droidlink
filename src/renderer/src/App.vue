@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import DeviceList from './components/DeviceList.vue'
 import PairingQr from './components/PairingQr.vue'
+import AppList from './components/AppList.vue'
 
 interface Device {
   serial: string
@@ -20,6 +21,37 @@ interface Device {
 const devices = ref<Device[]>([])
 const isScrcpyRunning = ref(false)
 const isLoading = ref(false)
+
+// 从本地存储加载设置
+const loadSettings = (): { maxSize: number; bitRate: string } => {
+  const defaultSettings = { maxSize: 0, bitRate: '50M' }
+  try {
+    const saved = localStorage.getItem('scrcpySettings')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      const validBitRates = ['8M', '16M', '24M', '32M', '50M']
+      if (parsed.bitRate && !validBitRates.includes(parsed.bitRate)) {
+        parsed.bitRate = '50M'
+      }
+      return { ...defaultSettings, ...parsed }
+    }
+  } catch {
+    // 忽略解析错误
+  }
+  return defaultSettings
+}
+
+const scrcpySettings = ref<{ maxSize: number; bitRate: string }>(loadSettings())
+
+// 监听设置变化并保存到本地存储
+watch(
+  scrcpySettings,
+  (newSettings) => {
+    localStorage.setItem('scrcpySettings', JSON.stringify(newSettings))
+  },
+  { deep: true }
+)
+
 const qrDataUrl = ref('')
 const qrReady = ref(false)
 const pairState = ref<string>('idle')
@@ -28,8 +60,20 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 let pairStatusTimer: ReturnType<typeof setInterval> | null = null
 let qrExpireTimer: ReturnType<typeof setTimeout> | null = null
 const qrExpired = ref(false)
+const showAppList = ref(false)
 
 const hasDevice = computed(() => devices.value.length > 0)
+const showPairing = computed(() => !hasDevice.value || showQr.value)
+const windowWidth = computed(() => {
+  let w = 640 // DeviceList 600 + padding
+  if (showPairing.value) w += 440 // PairingQr 400 + gap
+  if (showAppList.value) w = Math.max(w, 640)
+  return w
+})
+
+watch(windowWidth, (w) => {
+  window.api.resizeWindow(w, 720)
+})
 
 const refreshDevices = async (showLoading = false): Promise<void> => {
   if (showLoading) isLoading.value = true
@@ -119,7 +163,7 @@ const generateQr = async (): Promise<void> => {
 
 const startScrcpy = async (serial: string): Promise<void> => {
   isScrcpyRunning.value = true
-  await window.api.startScrcpy(serial)
+  await window.api.startScrcpy(serial, { ...scrcpySettings.value })
 }
 
 const stopScrcpy = async (): Promise<void> => {
@@ -139,6 +183,15 @@ onMounted(async () => {
   refreshTimer = setInterval(async () => {
     await refreshDevices()
   }, 3000)
+  window.api.onScrcpyStopped(() => {
+    isScrcpyRunning.value = false
+  })
+})
+
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+  if (pairStatusTimer) clearInterval(pairStatusTimer)
+  if (qrExpireTimer) clearTimeout(qrExpireTimer)
 })
 
 onUnmounted(() => {
@@ -153,17 +206,27 @@ onUnmounted(() => {
     <div class="drag-region"></div>
     <div class="traffic-light-pad"></div>
     <div class="flex gap-5 items-start">
-      <DeviceList
-        v-if="hasDevice"
-        :devices="devices"
-        :is-loading="isLoading"
-        :is-scrcpy-running="isScrcpyRunning"
-        @refresh="() => refreshDevices(true)"
-        @start-scrcpy="startScrcpy"
-        @stop-scrcpy="stopScrcpy"
-        @disconnect="disconnectWireless"
-        @pair-new="showQr = true"
-      />
+      <div>
+        <DeviceList
+          v-if="hasDevice"
+          :devices="devices"
+          :is-loading="isLoading"
+          :is-scrcpy-running="isScrcpyRunning"
+          :settings="scrcpySettings"
+          @refresh="() => refreshDevices(true)"
+          @start-scrcpy="startScrcpy"
+          @stop-scrcpy="stopScrcpy"
+          @disconnect="disconnectWireless"
+          @pair-new="showQr = true"
+          @show-app-list="showAppList = !showAppList"
+          @update:settings="(s) => (scrcpySettings = s)"
+        />
+        <AppList
+          v-if="showAppList && hasDevice"
+          :serial="devices[0]?.serial || ''"
+          @close="showAppList = false"
+        />
+      </div>
       <PairingQr
         v-if="!hasDevice || showQr"
         :qr-data-url="qrDataUrl"

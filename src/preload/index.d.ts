@@ -28,8 +28,19 @@ interface Api {
   }>
   getPairingStatus: () => Promise<{ state: string; message: string }>
   disconnectDevice: (serial: string) => Promise<{ success: boolean }>
-  startScrcpy: (serial?: string) => Promise<boolean>
+  startScrcpy: (
+    serial?: string,
+    options?: { maxSize?: number; bitRate?: string }
+  ) => Promise<boolean>
   stopScrcpy: () => Promise<boolean>
+  onScrcpyStopped: (callback: () => void) => void
+  listApps: (
+    serial: string,
+    force?: boolean
+  ) => Promise<{ packageName: string; label: string; icon?: string }[]>
+  getAppIcon: (serial: string, packageName: string) => Promise<string>
+  launchApp: (serial: string, packageName: string) => Promise<{ success: boolean }>
+  resizeWindow: (width: number, height: number) => void
 }
 
 declare global {

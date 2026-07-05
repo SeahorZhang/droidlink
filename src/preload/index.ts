@@ -27,8 +27,26 @@ const api = {
     ipcRenderer.invoke('get-pairing-status'),
   disconnectDevice: (serial: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('disconnect-device', serial),
-  startScrcpy: (serial?: string): Promise<boolean> => ipcRenderer.invoke('start-scrcpy', serial),
-  stopScrcpy: (): Promise<boolean> => ipcRenderer.invoke('stop-scrcpy')
+  startScrcpy: (
+    serial?: string,
+    options?: { maxSize?: number; bitRate?: string }
+  ): Promise<boolean> => ipcRenderer.invoke('start-scrcpy', { serial, ...options }),
+  stopScrcpy: (): Promise<boolean> => ipcRenderer.invoke('stop-scrcpy'),
+  onScrcpyStopped: (callback: () => void): void => {
+    ipcRenderer.on('scrcpy-stopped', () => callback())
+  },
+  listApps: (
+    serial: string,
+    force?: boolean
+  ): Promise<{ packageName: string; label: string; icon?: string }[]> =>
+    ipcRenderer.invoke('list-apps', serial, force),
+  getAppIcon: (serial: string, packageName: string): Promise<string> =>
+    ipcRenderer.invoke('get-app-icon', serial, packageName),
+  launchApp: (serial: string, packageName: string): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('launch-app', serial, packageName),
+  resizeWindow: (width: number, height: number): void => {
+    ipcRenderer.send('resize-window', width, height)
+  }
 }
 
 if (process.contextIsolated) {

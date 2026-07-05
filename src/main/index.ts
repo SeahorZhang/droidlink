@@ -2,15 +2,125 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { execFile, spawn, ChildProcess } from 'child_process'
+import { execFile, execFileSync, spawn, ChildProcess } from 'child_process'
 import { renderSVG } from 'uqr'
 import { Bonjour } from 'bonjour-service'
 import { randomInt } from 'crypto'
+import http from 'http'
+import fs from 'fs'
 
 let scrcpyProcess: ChildProcess | null = null
 let bonjour: Bonjour | null = null
+const appCache = new Map<string, { data: { packageName: string; label: string }[]; ts: number }>()
+const APP_CACHE_TTL = 5 * 60 * 1000
 let pairingState: 'idle' | 'waiting' | 'pairing' | 'success' | 'error' = 'idle'
 let pairingMsg = ''
+
+const COMPANION_PKG = 'com.anddrive.companion'
+const COMPANION_PORT = 9527
+const iconDir = join(app.getPath('userData'), 'app-icons')
+const clickHistoryPath = join(app.getPath('userData'), 'app-clicks.json')
+
+function getIconPath(pkg: string): string {
+  return join(iconDir, `${pkg.replace(/[/\\:]/g, '_')}.png`)
+}
+
+function loadIconFromDisk(pkg: string): string | '' {
+  try {
+    const data = fs.readFileSync(getIconPath(pkg))
+    return data.toString('base64')
+  } catch {
+    return ''
+  }
+}
+
+function saveIconToDisk(pkg: string, b64: string): void {
+  try {
+    if (!fs.existsSync(iconDir)) fs.mkdirSync(iconDir, { recursive: true })
+    fs.writeFileSync(getIconPath(pkg), Buffer.from(b64, 'base64'))
+  } catch {
+    /* ok */
+  }
+}
+
+function syncIcons(packageNames: string[]): void {
+  try {
+    if (!fs.existsSync(iconDir)) return
+    const pkgSet = new Set(packageNames)
+    for (const file of fs.readdirSync(iconDir)) {
+      const pkg = file.replace('.png', '').replace(/_/g, '/')
+      if (!pkgSet.has(pkg)) {
+        fs.unlinkSync(join(iconDir, file))
+      }
+    }
+  } catch {
+    /* ok */
+  }
+}
+
+// 后台补全缺失图标，不阻塞
+function prefetchMissingIcons(serial: string, apps: { packageName: string }[]): void {
+  const missing = apps.filter((a) => !loadIconFromDisk(a.packageName)).slice(0, 20)
+  if (missing.length === 0) return
+
+  execFileSync(
+    getAdbPath(),
+    ['-s', serial, 'forward', `tcp:${COMPANION_PORT}`, `tcp:${COMPANION_PORT}`],
+    {
+      encoding: 'utf-8',
+      timeout: 5000
+    }
+  )
+
+  for (const app of missing) {
+    httpGet(
+      `http://127.0.0.1:${COMPANION_PORT}/icon?pkg=${encodeURIComponent(app.packageName)}`,
+      5000
+    )
+      .then((b64) => {
+        if (b64) saveIconToDisk(app.packageName, b64)
+      })
+      .catch(() => {})
+  }
+}
+
+function loadClickHistory(): Map<string, number> {
+  try {
+    const data = fs.readFileSync(clickHistoryPath, 'utf-8')
+    return new Map(Object.entries(JSON.parse(data)))
+  } catch {
+    return new Map()
+  }
+}
+
+function saveClickHistory(history: Map<string, number>): void {
+  try {
+    fs.writeFileSync(clickHistoryPath, JSON.stringify(Object.fromEntries(history)))
+  } catch { /* ok */ }
+}
+
+function sortAppsByClick(apps: { packageName: string; label: string; icon?: string }[]): { packageName: string; label: string; icon?: string }[] {
+  const history = loadClickHistory()
+  return [...apps].sort((a, b) => {
+    const ta = history.get(a.packageName) || 0
+    const tb = history.get(b.packageName) || 0
+    return tb - ta
+  })
+}
+
+function killScrcpy(): void {
+  if (scrcpyProcess) {
+    scrcpyProcess.kill('SIGKILL')
+    scrcpyProcess = null
+  }
+  // 清理残留的 adb forward 和 scrcpy 相关进程
+  try {
+    execFileSync(getAdbPath(), ['forward', '--remove-all'], { encoding: 'utf-8', timeout: 3000 })
+  } catch { /* ok */ }
+  try {
+    execFileSync('pkill', ['-f', 'scrcpy'], { encoding: 'utf-8', timeout: 3000 })
+  } catch { /* ok */ }
+}
 
 function getScrcpyPath(): string {
   if (is.dev) return join(__dirname, '../../resources/scrcpy/scrcpy')
@@ -20,6 +130,94 @@ function getScrcpyPath(): string {
 function getAdbPath(): string {
   if (is.dev) return join(__dirname, '../../resources/scrcpy/adb')
   return join(process.resourcesPath, 'scrcpy', 'adb')
+}
+
+function getCompanionApkPath(): string {
+  if (is.dev) return join(__dirname, '../../resources/companion-app.apk')
+  return join(process.resourcesPath, 'companion-app.apk')
+}
+
+async function isCompanionInstalled(serial: string): Promise<boolean> {
+  try {
+    const output = execFileSync(
+      getAdbPath(),
+      ['-s', serial, 'shell', `pm list packages ${COMPANION_PKG}`],
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+    return output.includes(COMPANION_PKG)
+  } catch {
+    return false
+  }
+}
+
+async function installCompanion(serial: string): Promise<boolean> {
+  try {
+    const apkPath = getCompanionApkPath()
+    execFileSync(getAdbPath(), ['-s', serial, 'install', '-r', '-g', apkPath], {
+      encoding: 'utf-8',
+      timeout: 30000
+    })
+    return true
+  } catch (e) {
+    console.error('[companion] install failed:', e)
+    return false
+  }
+}
+
+function httpGet(url: string, timeoutMs = 10000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, { timeout: timeoutMs }, (res) => {
+      let data = ''
+      res.on('data', (chunk) => (data += chunk))
+      res.on('end', () => resolve(data))
+    })
+    req.on('error', reject)
+    req.on('timeout', () => {
+      req.destroy()
+      reject(new Error('timeout'))
+    })
+  })
+}
+
+async function fetchAppsViaCompanion(
+  serial: string
+): Promise<{ packageName: string; label: string; icon?: string }[]> {
+  // 端口转发
+  console.log('[companion] forwarding port...')
+  execFileSync(
+    getAdbPath(),
+    ['-s', serial, 'forward', `tcp:${COMPANION_PORT}`, `tcp:${COMPANION_PORT}`],
+    {
+      encoding: 'utf-8',
+      timeout: 5000
+    }
+  )
+
+  // 启动 companion app
+  console.log('[companion] starting app...')
+  execFileSync(
+    getAdbPath(),
+    ['-s', serial, 'shell', 'am', 'start', '-n', `${COMPANION_PKG}/.MainActivity`],
+    { encoding: 'utf-8', timeout: 5000 }
+  )
+
+  // 等服务启动
+  await new Promise((r) => setTimeout(r, 1000))
+
+  // 请求数据
+  console.log('[companion] fetching apps from http://127.0.0.1:' + COMPANION_PORT + '/apps')
+  const json = await httpGet(`http://127.0.0.1:${COMPANION_PORT}/apps`, 30000)
+  console.log('[companion] response length:', json.length)
+  const result = JSON.parse(json)
+
+  if (result.error) throw new Error(result.error)
+  console.log('[companion] apps count:', result.count)
+
+  return result.apps.map((a: { packageName: string; label: string; icon?: string }) => ({
+    packageName: a.packageName,
+    label: a.label,
+    icon: a.icon || ''
+  }))
 }
 
 function runAdb(args: string[]): Promise<string> {
@@ -124,9 +322,10 @@ async function getDeviceInfo(serial: string): Promise<{
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
-    width: 1100,
+    width: 800,
     height: 720,
-    minWidth: 1100,
+    minWidth: 300,
+    minHeight: 400,
     minHeight: 720,
     show: false,
     autoHideMenuBar: true,
@@ -262,37 +461,227 @@ app.whenReady().then(() => {
     }
   })
 
-  ipcMain.handle('start-scrcpy', async (_e, serial?: string) => {
-    if (scrcpyProcess) {
-      scrcpyProcess.kill()
-      scrcpyProcess = null
+  ipcMain.handle(
+    'start-scrcpy',
+    async (_e, opts: { serial?: string; maxSize?: number; bitRate?: string }) => {
+      if (scrcpyProcess) {
+        scrcpyProcess.kill('SIGKILL')
+        scrcpyProcess = null
+      }
+      const args: string[] = opts.serial ? ['-s', opts.serial] : []
+      if (opts.bitRate) args.push('-b', opts.bitRate)
+      // 使用H.265编码，画质更好
+      args.push('--video-codec', 'h265')
+      // 让scrcpy窗口始终在app上方
+      // args.push('--always-on-top')
+      // 设置窗口居中显示
+      args.push('--window-x', 'auto')
+      args.push('--window-y', 'auto')
+      // 获取设备型号并设置为窗口标题
+      if (opts.serial) {
+        try {
+          const deviceInfo = await getDeviceInfo(opts.serial)
+          const windowTitle = deviceInfo.deviceName || opts.serial
+          args.push('--window-title', windowTitle)
+        } catch {
+          // 获取失败时使用序列号作为标题
+          args.push('--window-title', opts.serial)
+        }
+      }
+      console.log('[scrcpy] spawn:', getScrcpyPath(), args)
+      scrcpyProcess = spawn(getScrcpyPath(), args, { stdio: 'pipe' })
+      scrcpyProcess.stdout?.on('data', (data) => console.log('[scrcpy]', data.toString()))
+      scrcpyProcess.stderr?.on('data', (data) => console.log('[scrcpy]', data.toString()))
+      scrcpyProcess.on('error', (err) => {
+        console.log('[scrcpy] error:', err.message)
+        scrcpyProcess = null
+        BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
+      })
+      scrcpyProcess.on('close', (code) => {
+        console.log('[scrcpy] close:', code)
+        scrcpyProcess = null
+        BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
+      })
+      return true
     }
-    scrcpyProcess = spawn(getScrcpyPath(), serial ? ['-s', serial] : [], { stdio: 'ignore' })
-    scrcpyProcess.on('error', () => {
-      scrcpyProcess = null
-    })
-    scrcpyProcess.on('close', () => {
-      scrcpyProcess = null
-    })
+  )
+
+  ipcMain.handle('stop-scrcpy', async () => {
+    killScrcpy()
     return true
   })
 
-  ipcMain.handle('stop-scrcpy', async () => {
-    if (scrcpyProcess) {
-      scrcpyProcess.kill()
-      scrcpyProcess = null
+  ipcMain.handle('list-apps', async (_e, serial: string, force?: boolean) => {
+    if (!force) {
+      const cached = appCache.get(serial)
+      if (cached && Date.now() - cached.ts < APP_CACHE_TTL) {
+        console.log('[list-apps] cache hit:', cached.data.length, 'apps')
+        return sortAppsByClick(cached.data)
+      }
     }
-    return true
+
+    // 优先用 companion app（快，有名称）
+    try {
+      const installed = await isCompanionInstalled(serial)
+      console.log('[list-apps] companion installed:', installed)
+      if (!installed) {
+        console.log('[list-apps] installing companion app...')
+        const ok = await installCompanion(serial)
+        console.log('[list-apps] install result:', ok)
+        if (!ok) throw new Error('install failed')
+      }
+      const data = await fetchAppsViaCompanion(serial)
+      console.log('[list-apps] sample:', JSON.stringify(data.slice(0, 3)))
+      // 同步图标缓存：删除旧的，补全缺失的
+      syncIcons(data.map((a) => a.packageName))
+      prefetchMissingIcons(serial, data)
+      appCache.set(serial, { data, ts: Date.now() })
+      return sortAppsByClick(data)
+    } catch (e) {
+      console.error('[list-apps] companion failed, fallback:', e)
+    }
+
+    // 回退：adb 命令（只有包名）
+    try {
+      const output = execFileSync(
+        getAdbPath(),
+        ['-s', serial, 'shell', 'cmd package list packages -3'],
+        { encoding: 'utf-8', timeout: 10000 }
+      )
+      const data = output
+        .split('\n')
+        .filter((l) => l.startsWith('package:'))
+        .map((l) => l.replace('package:', '').trim())
+        .filter(Boolean)
+        .map((pkg) => ({ packageName: pkg, label: '' }))
+
+      console.log('[list-apps] fallback data:', data.length, 'apps')
+      appCache.set(serial, { data, ts: Date.now() })
+      return sortAppsByClick(data)
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('get-app-icon', async (_e, serial: string, packageName: string) => {
+    // 先从磁盘读取
+    const disk = loadIconFromDisk(packageName)
+    if (disk) return disk
+
+    // 没有缓存，从 companion 拉取
+    try {
+      execFileSync(
+        getAdbPath(),
+        ['-s', serial, 'forward', `tcp:${COMPANION_PORT}`, `tcp:${COMPANION_PORT}`],
+        {
+          encoding: 'utf-8',
+          timeout: 5000
+        }
+      )
+      const b64 = await httpGet(
+        `http://127.0.0.1:${COMPANION_PORT}/icon?pkg=${encodeURIComponent(packageName)}`,
+        5000
+      )
+      if (b64) {
+        saveIconToDisk(packageName, b64)
+        return b64
+      }
+    } catch {
+      /* ok */
+    }
+    return ''
+  })
+
+  ipcMain.handle('launch-app', async (_e, serial: string, packageName: string) => {
+    // 记录点击历史
+    const history = loadClickHistory()
+    history.set(packageName, Date.now())
+    saveClickHistory(history)
+
+    try {
+      if (scrcpyProcess) {
+        scrcpyProcess.kill('SIGKILL')
+        scrcpyProcess = null
+      }
+      const args: string[] = []
+      if (serial) args.push('-s', serial)
+      args.push('--new-display=1920x1080/320')
+      args.push('--start-app', packageName)
+      args.push('--video-codec', 'h265')
+      args.push('--video-bit-rate', '24M')
+      args.push('--window-x', 'auto')
+      args.push('--window-y', 'auto')
+      if (serial) {
+        try {
+          const deviceInfo = await getDeviceInfo(serial)
+          args.push('--window-title', deviceInfo.deviceName || serial)
+        } catch {
+          args.push('--window-title', serial)
+        }
+      }
+      scrcpyProcess = spawn(getScrcpyPath(), args, { stdio: 'pipe' })
+      scrcpyProcess.on('error', (err) => {
+        console.log('[scrcpy] error:', err.message)
+        scrcpyProcess = null
+        BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
+      })
+      scrcpyProcess.on('close', () => {
+        scrcpyProcess = null
+        BrowserWindow.getAllWindows()[0]?.webContents.send('scrcpy-stopped')
+      })
+      return { success: true }
+    } catch {
+      return { success: false }
+    }
+  })
+
+  ipcMain.on('resize-window', (_e, width: number, height: number) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win) {
+      const [minW] = win.getMinimumSize()
+      win.setSize(Math.max(width, minW), height)
+    }
   })
 
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+
+  // 启动时自动安装 companion app 到所有已连接设备
+  installCompanionToAllDevices()
 })
 
+async function installCompanionToAllDevices(): Promise<void> {
+  try {
+    const stdout = execFileSync(getAdbPath(), ['devices'], { encoding: 'utf-8', timeout: 5000 })
+    const serials = stdout
+      .split('\n')
+      .filter((l) => l.endsWith('device'))
+      .map((l) => l.split('\t')[0])
+      .filter(Boolean)
+
+    for (const serial of serials) {
+      try {
+        const installed = await isCompanionInstalled(serial)
+        if (!installed) {
+          console.log(`[companion] installing on ${serial}...`)
+          await installCompanion(serial)
+          console.log(`[companion] installed on ${serial}`)
+        } else {
+          console.log(`[companion] already installed on ${serial}`)
+        }
+      } catch (e) {
+        console.error(`[companion] install failed on ${serial}:`, e)
+      }
+    }
+  } catch (e) {
+    console.error('[companion] detect devices failed:', e)
+  }
+}
+
 app.on('window-all-closed', () => {
-  if (scrcpyProcess) scrcpyProcess.kill()
+  if (scrcpyProcess) scrcpyProcess.kill('SIGKILL')
   if (bonjour) bonjour.destroy()
   if (process.platform !== 'darwin') app.quit()
 })
