@@ -6,3 +6,5 @@ out
 *.log*
 companion-app/app/build
 companion-app/.gradle
+src-tauri/target
+src-tauri/gen
