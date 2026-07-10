@@ -1,31 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import Icon from './Icon.vue'
+import { usePairing } from '../composables/usePairing'
 
-const props = defineProps<{
-  qrDataUrl: string
-  qrReady: boolean
-  qrExpired: boolean
-  pairState: string
-  hasDevice: boolean
-}>()
+const { pairState, qrDataUrl, qrReady, qrExpired, pairMessage, generateQr } = usePairing()
 
-const emit = defineEmits<{
-  generateQr: []
-  close: []
-}>()
+onMounted(() => {
+  generateQr()
+})
 
 const overlayState = computed(() => {
-  if (props.pairState === 'pairing') {
+  if (pairState.value === 'pairing') {
     return { icon: 'loading', color: 'text-amber-400', text: '正在配对', clickable: false }
   }
-  if (props.pairState === 'success') {
+  if (pairState.value === 'success') {
     return { icon: 'check', color: 'text-emerald-400', text: '配对成功', clickable: false }
   }
-  if (props.pairState === 'error') {
-    return { icon: 'close', color: 'text-red-400/80', text: '配对失败，点击重试', clickable: true }
+  if (pairState.value === 'error') {
+    return { icon: 'close', color: 'text-red-400/80', text: pairMessage.value || '配对失败，点击重试', clickable: true }
   }
-  if (props.qrExpired) {
+  if (qrExpired.value) {
     return { icon: 'refresh', color: 'text-white/80', text: '刷新二维码', clickable: true }
   }
   return null
@@ -40,14 +34,6 @@ const showOverlay = computed(() => overlayState.value !== null)
   >
     <div class="mb-3 flex items-center justify-between">
       <span class="text-[11px] font-medium tracking-wider text-white/35 uppercase">配对</span>
-      <button
-        v-if="hasDevice"
-        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[11px] text-white/40 transition-colors hover:bg-white/5 hover:text-white/60"
-        @click="emit('close')"
-      >
-        <Icon name="close" class="h-3 w-3" />
-        关闭
-      </button>
     </div>
 
     <div class="mb-5 space-y-1.5 text-[11px] text-white/35">
@@ -69,7 +55,7 @@ const showOverlay = computed(() => overlayState.value !== null)
         v-if="showOverlay"
         class="absolute inset-0 flex flex-col items-center justify-center bg-black/70"
         :class="{ 'cursor-pointer': overlayState!.clickable }"
-        @click="overlayState!.clickable ? emit('generateQr') : undefined"
+        @click="overlayState!.clickable ? generateQr() : undefined"
       >
         <Icon
           v-if="overlayState!.icon !== 'loading'"

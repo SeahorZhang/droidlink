@@ -1,15 +1,16 @@
-use std::process::{Command, Child};
+use std::process::Command;
 use std::sync::Mutex;
 use tauri::{State, AppHandle, Emitter};
 
 pub struct ScrcpyState {
-    pub process: Mutex<Option<Child>>,
+    /// PID of the running scrcpy process, if any.
+    pid: Mutex<Option<u32>>,
 }
 
 impl ScrcpyState {
     pub fn new() -> Self {
         Self {
-            process: Mutex::new(None),
+            pid: Mutex::new(None),
         }
     }
 }
@@ -32,10 +33,13 @@ fn get_adb_path() -> String {
     bundled.unwrap_or_else(|| "adb".to_string())
 }
 
-fn kill_scrcpy_clean(state: &ScrcpyState) {
-    // Kill the tracked process
-    if let Some(mut child) = state.process.lock().unwrap().take() {
-        child.kill().ok();
+fn kill_scrcpy_clean(pid: Option<u32>) {
+    // Kill by PID
+    if let Some(pid) = pid {
+        #[cfg(unix)]
+        unsafe { libc::kill(pid as i32, libc::SIGKILL); }
+        #[cfg(windows)]
+        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
     }
     // Clean up adb forward
     let _ = Command::new(get_adb_path())
@@ -50,7 +54,6 @@ fn kill_scrcpy_clean(state: &ScrcpyState) {
 #[derive(serde::Deserialize)]
 pub struct ScrcpyOptions {
     pub serial: Option<String>,
-    pub max_size: Option<u32>,
     pub bit_rate: Option<String>,
 }
 
@@ -61,7 +64,8 @@ pub async fn start_scrcpy(
     app: AppHandle,
 ) -> Result<bool, String> {
     // Kill existing scrcpy first
-    kill_scrcpy_clean(&state);
+    let old_pid = state.pid.lock().unwrap().take();
+    kill_scrcpy_clean(old_pid);
 
     let mut args: Vec<String> = Vec::new();
 
@@ -91,24 +95,18 @@ pub async fn start_scrcpy(
     }
 
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let child = Command::new(get_scrcpy_path())
+    let mut child = Command::new(get_scrcpy_path())
         .args(&args_str)
         .spawn()
         .map_err(|e| e.to_string())?;
 
-    {
-        let mut proc = state.process.lock().unwrap();
-        *proc = Some(child);
-    }
+    let pid = child.id();
+    *state.pid.lock().unwrap() = Some(pid);
 
-    // Spawn a thread to watch for process exit and emit event
-    let app_clone = app.clone();
+    // Spawn a thread that waits for the child to exit, then emits the event
     std::thread::spawn(move || {
-        // Wait a bit for the process to start
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        // Emit scrcpy-stopped event after a delay (simulating process exit)
-        // In a real implementation, we'd track the child process ID
-        let _ = app_clone.emit("scrcpy-stopped", ());
+        let _ = child.wait();
+        let _ = app.emit("scrcpy-stopped", false);
     });
 
     Ok(true)
@@ -117,7 +115,10 @@ pub async fn start_scrcpy(
 #[tauri::command]
 pub async fn stop_scrcpy(
     state: State<'_, ScrcpyState>,
+    app: AppHandle,
 ) -> Result<bool, String> {
-    kill_scrcpy_clean(&state);
+    let pid = state.pid.lock().unwrap().take();
+    kill_scrcpy_clean(pid);
+    let _ = app.emit("scrcpy-stopped", false);
     Ok(true)
 }

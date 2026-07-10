@@ -12,33 +12,6 @@ fn get_adb_path() -> String {
     bundled.unwrap_or_else(|| "adb".to_string())
 }
 
-fn run_adb(args: &[&str]) -> Result<String, String> {
-    let output = Command::new(get_adb_path())
-        .args(args)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
-}
-
-fn run_adb_serial(serial: &str, args: &[&str]) -> Result<String, String> {
-    let mut full_args = vec!["-s", serial];
-    full_args.extend_from_slice(args);
-    run_adb(&full_args)
-}
-
-#[derive(Serialize)]
-pub struct Device {
-    pub serial: String,
-    pub model: String,
-    #[serde(rename = "type")]
-    pub device_type: String,
-}
-
 #[derive(Serialize)]
 pub struct DeviceInfo {
     pub battery: i32,
@@ -49,46 +22,6 @@ pub struct DeviceInfo {
     pub screen_on: bool,
     pub device_name: String,
     pub charging: bool,
-}
-
-#[tauri::command]
-pub async fn list_devices() -> Result<Vec<Device>, String> {
-    let stdout = run_adb(&["devices", "-l"])?;
-    let mut devices = Vec::new();
-
-    for line in stdout.lines() {
-        let device_idx = line.find(" device ");
-        if device_idx == None { continue; }
-        let idx = device_idx.unwrap();
-        let serial = line[..idx].trim();
-        if serial.is_empty() { continue; }
-
-        let rest = &line[idx..];
-        let model_match = rest.find("model:").map(|i| {
-            let start = i + 6;
-            let end = rest[start..].find(|c: char| c.is_whitespace()).unwrap_or(rest[start..].len());
-            &rest[start..start + end]
-        });
-
-        let model = model_match.unwrap_or(serial).to_string();
-        let device_type = if serial.contains(':') || serial.contains("_tcp") {
-            "wireless"
-        } else {
-            "usb"
-        };
-
-        devices.push(Device {
-            serial: serial.to_string(),
-            model,
-            device_type: device_type.to_string(),
-        });
-    }
-
-    // Deduplicate by model
-    let mut seen = std::collections::HashSet::new();
-    devices.retain(|d| seen.insert(d.model.clone()));
-
-    Ok(devices)
 }
 
 #[tauri::command]
@@ -171,16 +104,4 @@ pub async fn get_device_info(serial: String) -> Result<DeviceInfo, String> {
         device_name: display_name,
         charging,
     })
-}
-
-#[tauri::command]
-pub async fn disconnect_device(serial: String) -> Result<bool, String> {
-    run_adb(&["disconnect", &serial])?;
-    Ok(true)
-}
-
-#[tauri::command]
-pub async fn launch_app(serial: String, package_name: String) -> Result<bool, String> {
-    run_adb_serial(&serial, &["shell", "monkey", "-p", &package_name, "-c", "android.intent.category.LAUNCHER", "1"])?;
-    Ok(true)
 }
