@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { Device } from '../composables/useDevices'
 import { Icon } from '@iconify/vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import BaseButton from './BaseButton.vue'
 import BaseBadge from './BaseBadge.vue'
+import SettingsPanel from './SettingsPanel.vue'
 
 const props = defineProps<{
   device: Device
@@ -18,6 +19,20 @@ const emit = defineEmits<{
 }>()
 
 const showConfirm = ref(false)
+const showSettings = ref(false)
+
+// Settings state
+const loadSettings = (): { maxSize: number; bitRate: string } => {
+  const saved = localStorage.getItem('scrcpySettings')
+  if (saved) {
+    try {
+      return { maxSize: 0, bitRate: '50M', ...JSON.parse(saved) }
+    } catch {}
+  }
+  return { maxSize: 0, bitRate: '50M' }
+}
+const settings = ref(loadSettings())
+watch(settings, (s) => localStorage.setItem('scrcpySettings', JSON.stringify(s)), { deep: true })
 
 function handleConfirm() {
   showConfirm.value = false
@@ -96,17 +111,25 @@ const statItems = computed<StatItem[]>(() => [
 
 <template>
   <div
-    class="flex h-[580px] w-80 flex-col rounded-xl border border-black/8 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
+    class="flex w-80 flex-col rounded-xl border border-black/8 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
   >
     <!-- Device name & model -->
-    <div class="mb-3 px-5 py-5">
-      <h2 class="max-w-full truncate text-2xl font-semibold text-black/80">
-        {{ device.deviceName || device.model }}
-      </h2>
-      <div class="mt-2.5 flex items-center gap-1.5">
-        <span class="text-[11px] text-black/40">{{ device.model }}</span>
-        <BaseBadge :label="device.type === 'wireless' ? 'Wi-Fi' : 'USB'" />
+    <div class="flex items-start justify-between px-5 py-5">
+      <div class="min-w-0 flex-1">
+        <h2 class="max-w-full truncate text-2xl font-semibold text-black/80">
+          {{ device.deviceName || device.model }}
+        </h2>
+        <div class="mt-2.5 flex items-center gap-1.5">
+          <span class="text-[11px] text-black/40">{{ device.model }}</span>
+          <BaseBadge :label="device.type === 'wireless' ? 'Wi-Fi' : 'USB'" />
+        </div>
       </div>
+      <button
+        class="flex-shrink-0 cursor-pointer rounded-lg p-2 text-black/30 transition-all hover:bg-black/5 hover:text-black/60"
+        @click="showSettings = true"
+      >
+        <Icon icon="lucide:settings" class="h-4 w-4" />
+      </button>
     </div>
 
     <!-- Info content -->
@@ -204,4 +227,27 @@ const statItems = computed<StatItem[]>(() => [
     @confirm="handleConfirm"
     @cancel="showConfirm = false"
   />
+
+  <!-- Settings Dialog -->
+  <Teleport to="body">
+    <div
+      v-if="showSettings"
+      class="fixed inset-0 z-50 flex items-center justify-center"
+      @click.self="showSettings = false"
+    >
+      <div class="fixed inset-0 bg-black/30 backdrop-blur-sm" @click="showSettings = false" />
+      <div class="relative z-10 w-[320px] rounded-xl border border-black/8 bg-white p-5 shadow-xl">
+        <div class="mb-4 flex items-center justify-between">
+          <span class="text-sm font-medium text-black/70">设置</span>
+          <button
+            class="cursor-pointer rounded p-1 text-black/30 transition-all hover:bg-black/5 hover:text-black/60"
+            @click="showSettings = false"
+          >
+            <Icon icon="lucide:x" class="h-4 w-4" />
+          </button>
+        </div>
+        <SettingsPanel :settings="settings" @update:settings="(s) => (settings = s)" />
+      </div>
+    </div>
+  </Teleport>
 </template>

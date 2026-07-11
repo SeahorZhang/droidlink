@@ -8,19 +8,6 @@ import { useScrcpy } from './composables/useScrcpy'
 import AppHeader from './components/AppHeader.vue'
 import AppFooter from './components/AppFooter.vue'
 
-// Settings
-const loadSettings = (): { maxSize: number; bitRate: string } => {
-  const saved = localStorage.getItem('scrcpySettings')
-  if (saved) {
-    try {
-      return { maxSize: 0, bitRate: '50M', ...JSON.parse(saved) }
-    } catch {}
-  }
-  return { maxSize: 0, bitRate: '50M' }
-}
-const settings = ref(loadSettings())
-watch(settings, (s) => localStorage.setItem('scrcpySettings', JSON.stringify(s)), { deep: true })
-
 // Composables
 const { devices, isLoading, hasDevice, refreshDevices, disconnectDevice } = useDevices()
 const { isRunning: isScrcpyRunning, start: startScrcpy, stop: stopScrcpy } = useScrcpy()
@@ -65,7 +52,7 @@ function handleDisconnect() {
       @pair-new="pairNew"
     />
 
-    <div class="flex flex-1 items-center justify-center gap-5 px-8 pt-2">
+    <div class="flex flex-1 justify-center gap-5 pt-4 pb-6">
       <DeviceList
         v-if="hasDevice && currentDevice"
         :device="currentDevice"
@@ -74,17 +61,8 @@ function handleDisconnect() {
         @stop-scrcpy="stopScrcpy"
         @disconnect="handleDisconnect"
       />
-
-      <div class="flex">
-        <PairingQr v-if="!hasDevice || !currentDevice" :has-device="hasDevice" />
-
-        <RightPanel
-          v-if="hasDevice && currentDevice"
-          :serial="currentDevice.serial"
-          :settings="settings"
-          @update:settings="(s) => (settings = s)"
-        />
-      </div>
+      <PairingQr v-if="!hasDevice || !currentDevice" :has-device="hasDevice" />
+      <RightPanel v-if="hasDevice && currentDevice" :serial="currentDevice.serial" />
     </div>
 
     <AppFooter />
