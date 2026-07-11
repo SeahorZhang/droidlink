@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import { tauri } from '../api'
 
 export interface AppInfo {
@@ -32,7 +32,7 @@ const getCache = (s: string) => {
 const setCache = (s: string, apps: AppInfo[], v: string) =>
   localStorage.setItem(`appCache_${s}`, JSON.stringify({ apps, version: v }))
 
-export function useApps(serial: string) {
+export function useApps(serial: Ref<string>) {
   const apps = ref<AppInfo[]>([])
   const isLoading = ref(false)
   const isRefreshing = ref(false)
@@ -42,23 +42,23 @@ export function useApps(serial: string) {
     return [...list].sort((a, b) => (h.get(b.packageName) || 0) - (h.get(a.packageName) || 0))
   }
 
-  const forward = () => tauri.adb(['-s', serial, 'forward', `tcp:${PORT}`, `tcp:${PORT}`])
+  const forward = () => tauri.adb(['-s', serial.value, 'forward', `tcp:${PORT}`, `tcp:${PORT}`])
 
   const isInstalled = async () => {
-    const out = await tauri.adb(['-s', serial, 'shell', 'pm', 'list', 'packages', COMPANION])
+    const out = await tauri.adb(['-s', serial.value, 'shell', 'pm', 'list', 'packages', COMPANION])
     return out.includes(COMPANION)
   }
 
   const install = async () => {
     const dir = await tauri.getDataDir()
-    await tauri.adb(['-s', serial, 'install', '-r', '-g', `${dir}/../companion-app.apk`])
+    await tauri.adb(['-s', serial.value, 'install', '-r', '-g', `${dir}/../companion-app.apk`])
     for (const op of ['QUERY_ALL_PACKAGES', '10022', '10004', '10021']) {
       await tauri
-        .adb(['-s', serial, 'shell', 'appops', 'set', COMPANION, op, 'allow'])
+        .adb(['-s', serial.value, 'shell', 'appops', 'set', COMPANION, op, 'allow'])
         .catch(() => {})
     }
     await tauri
-      .adb(['-s', serial, 'shell', 'am', 'start', '-n', `${COMPANION}/.MainActivity`])
+      .adb(['-s', serial.value, 'shell', 'am', 'start', '-n', `${COMPANION}/.MainActivity`])
       .catch(() => {})
   }
 
@@ -88,14 +88,14 @@ export function useApps(serial: string) {
   async function loadApps(force = false) {
     isLoading.value = true
     try {
-      const raw = await tauri.adb(['-s', serial, 'shell', 'pm', 'list', 'packages', '-3'])
+      const raw = await tauri.adb(['-s', serial.value, 'shell', 'pm', 'list', 'packages', '-3'])
       const pkgs = raw
         .split('\n')
         .filter((l) => l.startsWith('package:'))
         .map((l) => l.replace('package:', '').trim())
         .filter(Boolean)
 
-      const cached = getCache(serial)
+      const cached = getCache(serial.value)
       const cachedMap = new Map<string, AppInfo>(
         (cached?.apps || []).map((a: AppInfo) => [a.packageName, a])
       )
@@ -125,7 +125,7 @@ export function useApps(serial: string) {
         ...a,
         icon: a.icon || iconMap.get(a.packageName) || ''
       }))
-      setCache(serial, withIcons, result.version)
+      setCache(serial.value, withIcons, result.version)
       apps.value = sort(withIcons)
     } catch (e) {
       console.error('loadApps:', e)
@@ -147,12 +147,12 @@ export function useApps(serial: string) {
   }
 
   async function uninstallCompanion() {
-    await tauri.adb(['-s', serial, 'shell', 'pm', 'uninstall', COMPANION])
+    await tauri.adb(['-s', serial.value, 'shell', 'pm', 'uninstall', COMPANION])
     apps.value = []
   }
 
   async function clearCache() {
-    localStorage.removeItem(`appCache_${serial}`)
+    localStorage.removeItem(`appCache_${serial.value}`)
     apps.value = []
     await loadApps(true)
   }

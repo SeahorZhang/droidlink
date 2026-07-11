@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import BaseButton from './BaseButton.vue'
+
 const props = defineProps<{
   settings: { maxSize: number; bitRate: string }
 }>()
@@ -30,37 +32,27 @@ const setBitRate = (value: string): void => {
     <div>
       <span class="mb-2 block text-[10px] tracking-wider text-black/40 uppercase">分辨率</span>
       <div class="flex gap-1.5">
-        <button
+        <BaseButton
           v-for="opt in resolutionOptions"
           :key="opt.value"
-          :class="[
-            'cursor-pointer rounded-md px-2.5 py-1 text-[11px] transition-all',
-            settings.maxSize === opt.value
-              ? 'border border-blue-500/30 bg-blue-500/10 text-blue-500'
-              : 'border border-transparent text-black/40 hover:bg-black/5 hover:text-black/60'
-          ]"
+          :active="settings.maxSize === opt.value"
           @click="setResolution(opt.value)"
         >
           {{ opt.label }}
-        </button>
+        </BaseButton>
       </div>
     </div>
     <div>
       <span class="mb-2 block text-[10px] tracking-wider text-black/40 uppercase">码率</span>
       <div class="flex gap-1.5">
-        <button
+        <BaseButton
           v-for="br in bitRateOptions"
           :key="br"
-          :class="[
-            'cursor-pointer rounded-md px-2.5 py-1 text-[11px] transition-all',
-            settings.bitRate === br
-              ? 'border border-blue-500/30 bg-blue-500/10 text-blue-500'
-              : 'border border-transparent text-black/40 hover:bg-black/5 hover:text-black/60'
-          ]"
+          :active="settings.bitRate === br"
           @click="setBitRate(br)"
         >
           {{ br }}
-        </button>
+        </BaseButton>
       </div>
     </div>
   </div>

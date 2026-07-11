@@ -124,12 +124,15 @@ const statItems = computed<StatItem[]>(() => [
           <BaseBadge :label="device.type === 'wireless' ? 'Wi-Fi' : 'USB'" />
         </div>
       </div>
-      <button
-        class="flex-shrink-0 cursor-pointer rounded-lg p-2 text-black/30 transition-all hover:bg-black/5 hover:text-black/60"
-        @click="showSettings = true"
-      >
-        <Icon icon="lucide:settings" class="h-4 w-4" />
-      </button>
+      <div class="flex items-center">
+        <BaseButton
+          v-if="device.type === 'wireless'"
+          icon="lucide:unplug"
+          icon-only
+          @click="showConfirm = true"
+        />
+        <BaseButton icon="lucide:settings" icon-only @click="showSettings = true" />
+      </div>
     </div>
 
     <!-- Info content -->
@@ -186,12 +189,7 @@ const statItems = computed<StatItem[]>(() => [
         ></span>
       </div>
       <span class="flex-1 text-[10px] font-medium text-green-600">屏幕镜像运行中</span>
-      <button
-        class="cursor-pointer rounded px-2 py-0.5 text-[10px] font-medium text-red-500 transition-all hover:bg-red-500/10"
-        @click="emit('stopScrcpy')"
-      >
-        停止
-      </button>
+      <BaseButton variant="danger" size="sm" @click="emit('stopScrcpy')"> 停止 </BaseButton>
     </div>
 
     <!-- Actions -->
@@ -199,18 +197,11 @@ const statItems = computed<StatItem[]>(() => [
       <BaseButton
         variant="primary"
         icon="lucide:monitor"
+        class="w-full"
         :disabled="isScrcpyRunning"
         @click="emit('startScrcpy', device.serial)"
       >
         屏幕镜像
-      </BaseButton>
-      <BaseButton
-        v-if="device.type === 'wireless'"
-        variant="secondary"
-        icon="lucide:unplug"
-        @click="showConfirm = true"
-      >
-        断开连接
       </BaseButton>
     </div>
   </div>
@@ -239,12 +230,7 @@ const statItems = computed<StatItem[]>(() => [
       <div class="relative z-10 w-[320px] rounded-xl border border-black/8 bg-white p-5 shadow-xl">
         <div class="mb-4 flex items-center justify-between">
           <span class="text-sm font-medium text-black/70">设置</span>
-          <button
-            class="cursor-pointer rounded p-1 text-black/30 transition-all hover:bg-black/5 hover:text-black/60"
-            @click="showSettings = false"
-          >
-            <Icon icon="lucide:x" class="h-4 w-4" />
-          </button>
+          <BaseButton icon="lucide:x" icon-only @click="showSettings = false" />
         </div>
         <SettingsPanel :settings="settings" @update:settings="(s) => (settings = s)" />
       </div>

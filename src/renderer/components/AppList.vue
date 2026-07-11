@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount } from 'vue'
+import { ref, watch, onBeforeUnmount, toRef } from 'vue'
 import { useApps, type AppInfo } from '../composables/useApps'
+import BaseButton from './BaseButton.vue'
 
 const props = defineProps<{
   serial: string
 }>()
+
+const serial = toRef(props, 'serial')
 
 const {
   apps,
@@ -15,10 +18,19 @@ const {
   recordClick,
   uninstallCompanion,
   clearCache
-} = useApps(props.serial)
+} = useApps(serial)
 
 const searchText = ref('')
 const displayApps = ref<AppInfo[]>([])
+
+// Load apps when serial changes
+watch(
+  serial,
+  (val) => {
+    if (val) loadApps()
+  },
+  { immediate: true }
+)
 
 // Filter apps based on search
 watch(
@@ -49,6 +61,11 @@ const reinstall = async () => {
   await loadApps(true)
 }
 
+const uninstall = async () => {
+  await uninstallCompanion()
+  apps.value = []
+}
+
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 onBeforeUnmount(() => {
@@ -62,40 +79,25 @@ onBeforeUnmount(() => {
 <template>
   <div class="p-3">
     <!-- Toolbar -->
-    <div class="mb-3 flex items-center justify-end gap-1.5">
-      <button
-        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-black/40 transition-colors hover:bg-black/5 hover:text-black/60"
-        :class="{ 'pointer-events-none opacity-50': isRefreshing }"
+    <div class="mb-3 flex items-center justify-end">
+      <BaseButton
+        variant="ghost"
+        size="sm"
+        icon="lucide:refresh-cw"
+        :loading="isRefreshing"
         @click="refreshApps()"
       >
-        <svg
-          class="h-3 w-3"
-          :class="{ 'animate-spin': isRefreshing }"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-          />
-        </svg>
         刷新
-      </button>
-      <button
-        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-black/40 transition-colors hover:bg-black/5 hover:text-black/60"
-        @click="reinstall()"
-      >
-        重装
-      </button>
-      <button
-        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-black/40 transition-colors hover:bg-black/5 hover:text-black/60"
-        @click="clearCache()"
-      >
+      </BaseButton>
+      <BaseButton variant="ghost" size="sm" icon="lucide:download" @click="reinstall()">
+        安装
+      </BaseButton>
+      <BaseButton variant="ghost" size="sm" icon="lucide:trash-2" @click="uninstall()">
+        卸载
+      </BaseButton>
+      <BaseButton variant="ghost" size="sm" icon="lucide:eraser" @click="clearCache()">
         清除缓存
-      </button>
+      </BaseButton>
     </div>
 
     <!-- Search -->
@@ -121,7 +123,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- App grid -->
-    <div v-else class="grid flex-1 grid-cols-7 gap-2 overflow-y-auto">
+    <div v-else class="grid grid-cols-5 gap-2">
       <div
         v-for="app in displayApps"
         :key="app.packageName"

@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import type { Device } from '../composables/useDevices'
 import { Icon } from '@iconify/vue'
+import BaseButton from './BaseButton.vue'
 import BaseBadge from './BaseBadge.vue'
 
 defineProps<{
@@ -38,11 +39,13 @@ const open = ref(false)
         align="start"
       >
         <div class="text-[10px] font-medium text-black/40 px-2 py-1">已连接设备</div>
-        <button
+        <BaseButton
           v-for="device in devices"
           :key="device.serial"
-          class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-gray-100"
-          :class="{ 'bg-blue-500/10': device.serial === currentSerial }"
+          variant="ghost"
+          size="sm"
+          class="w-full justify-start"
+          :active="device.serial === currentSerial"
           @click="emit('select', device.serial); open = false"
         >
           <span
@@ -56,17 +59,19 @@ const open = ref(false)
             variant="blue"
             :label="device.type === 'wireless' ? 'Wi-Fi' : 'USB'"
           />
-        </button>
+        </BaseButton>
 
         <div class="my-1 border-t border-black/8"></div>
 
-        <button
-          class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] text-black/50 transition-colors hover:bg-gray-100 hover:text-black/70"
+        <BaseButton
+          variant="ghost"
+          size="sm"
+          icon="lucide:plus"
+          class="w-full"
           @click="emit('pairNew'); open = false"
         >
-          <Icon icon="lucide:plus" class="h-3 w-3" />
           配对新设备
-        </button>
+        </BaseButton>
       </PopoverContent>
     </PopoverPortal>
   </PopoverRoot>

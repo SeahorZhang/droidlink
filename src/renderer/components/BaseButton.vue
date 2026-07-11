@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 
-defineProps<{
-  variant?: 'primary' | 'secondary' | 'danger'
+const props = defineProps<{
+  variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
   icon?: string
   disabled?: boolean
   loading?: boolean
+  size?: 'sm' | 'md'
+  active?: boolean
+  iconOnly?: boolean
 }>()
 
 defineEmits<{
@@ -17,17 +20,29 @@ defineEmits<{
   <button
     :disabled="disabled || loading"
     :class="[
-      'flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg py-2.5 text-[12px] font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40',
-      variant === 'primary' && 'bg-blue-500 text-white hover:bg-blue-600',
-      variant === 'secondary' && 'border border-black/8 text-black/50 hover:bg-gray-50 hover:text-black/70',
-      variant === 'danger' && 'bg-red-500 text-white hover:bg-red-600'
+      'inline-flex cursor-pointer items-center justify-center transition-all disabled:cursor-not-allowed disabled:opacity-40',
+      iconOnly
+        ? 'rounded-md p-1.5'
+        : size === 'sm'
+          ? 'gap-1 rounded-md px-2 py-1 text-[12px]'
+          : 'gap-2 rounded-lg px-4 py-2.5 text-[12px]',
+      variant === 'primary' && 'bg-blue-500 font-medium text-white hover:bg-blue-600',
+      variant === 'secondary' &&
+        'border border-black/8 font-medium text-black/50 hover:bg-gray-50 hover:text-black/70',
+      variant === 'danger' && 'bg-red-500 font-medium text-white hover:bg-red-600',
+      variant === 'ghost' && 'text-black/40 hover:bg-black/5 hover:text-black/60',
+      !variant && active && 'border border-blue-500/30 bg-blue-500/10 text-blue-500',
+      !variant &&
+        !active &&
+        'border border-transparent text-black/40 hover:bg-black/5 hover:text-black/60',
+      !variant && !iconOnly && 'rounded-md px-2.5 py-1 text-[12px]'
     ]"
     @click="$emit('click')"
   >
-    <Icon v-if="icon && !loading" :icon="icon" class="h-4 w-4" />
+    <Icon v-if="icon && !loading" :icon="icon" />
     <div
       v-if="loading"
-      class="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
+      class="animate-spin rounded-full border-2 border-current border-t-transparent"
     ></div>
     <slot />
   </button>

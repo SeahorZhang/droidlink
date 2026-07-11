@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { DialogContent, DialogOverlay, DialogPortal, DialogRoot } from 'reka-ui'
+import BaseButton from './BaseButton.vue'
 
 defineProps<{
   visible: boolean
@@ -27,18 +28,12 @@ const emit = defineEmits<{
         {{ message }}
       </p>
       <div class="flex justify-end gap-2">
-        <button
-          class="cursor-pointer rounded-lg px-4 py-1.5 text-[11px] font-medium text-black/50 transition-colors hover:bg-black/5"
-          @click="emit('cancel')"
-        >
+        <BaseButton variant="secondary" size="sm" @click="emit('cancel')">
           取消
-        </button>
-        <button
-          class="cursor-pointer rounded-lg bg-red-500 px-4 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-red-600"
-          @click="emit('confirm')"
-        >
+        </BaseButton>
+        <BaseButton variant="danger" size="sm" @click="emit('confirm')">
           确认移除
-        </button>
+        </BaseButton>
       </div>
     </DialogContent>
     </DialogPortal>
