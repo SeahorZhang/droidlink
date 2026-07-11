@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { Device } from '../composables/useDevices'
 import Icon from './Icon.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 defineProps<{
   device: Device
@@ -11,6 +13,19 @@ const emit = defineEmits<{
   startScrcpy: [serial: string]
   disconnect: [serial: string]
 }>()
+
+const showConfirm = ref(false)
+const pendingSerial = ref('')
+
+function handleDisconnect(serial: string) {
+  pendingSerial.value = serial
+  showConfirm.value = true
+}
+
+function handleConfirm() {
+  showConfirm.value = false
+  emit('disconnect', pendingSerial.value)
+}
 </script>
 
 <template>
@@ -81,10 +96,23 @@ const emit = defineEmits<{
       <button
         v-if="device.type === 'wireless'"
         class="cursor-pointer rounded-md px-2.5 py-1 text-[11px] font-medium text-white/25 transition-all hover:bg-white/5 hover:text-white/50"
-        @click="emit('disconnect', device.serial)"
+        @click="handleDisconnect(device.serial)"
       >
-        移除设备
+        断开连接
       </button>
     </div>
   </div>
+
+  <ConfirmDialog
+    :visible="showConfirm"
+    title="断开连接"
+    message="设备将被断开连接。
+
+手机端的配对记录仍会保留，设备可能会自动重连。
+
+如需彻底断开，请在手机上手动移除：
+开发者选项 > 无线调试 > 已配对的设备 > 移除"
+    @confirm="handleConfirm"
+    @cancel="showConfirm = false"
+  />
 </template>

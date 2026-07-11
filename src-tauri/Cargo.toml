@@ -22,7 +22,6 @@ mdns-sd = "0.11"
 base64 = "0.22"
 dirs = "5"
 image = { version = "0.25", default-features = false, features = ["png"] }
-qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

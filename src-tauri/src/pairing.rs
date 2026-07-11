@@ -1,9 +1,10 @@
 use mdns_sd::ServiceDaemon;
-use qrcode::QrCode;
-use qrcode::render::svg;
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::State;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -12,8 +13,17 @@ pub struct PairingStatus {
     pub message: String,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct DiscoveredDevice {
+    pub name: String,
+    pub address: String,
+}
+
 pub struct PairingState {
     pub status: Arc<Mutex<PairingStatus>>,
+    pub devices: Arc<Mutex<Vec<DiscoveredDevice>>>,
+    pub password: Mutex<Option<String>>,
+    cancel: Arc<AtomicBool>,
 }
 
 impl PairingState {
@@ -23,6 +33,9 @@ impl PairingState {
                 state: "idle".to_string(),
                 message: String::new(),
             })),
+            devices: Arc::new(Mutex::new(Vec::new())),
+            password: Mutex::new(None),
+            cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -37,41 +50,56 @@ fn get_adb_path() -> String {
 }
 
 #[tauri::command]
-pub async fn generate_pairing_qr(
-    state: State<'_, PairingState>,
-) -> Result<serde_json::Value, String> {
-    // Reset state
+pub async fn start_discovery(state: State<'_, PairingState>) -> Result<bool, String> {
+    state.cancel.store(false, Ordering::Relaxed);
+    state.devices.lock().unwrap().clear();
     {
         let mut s = state.status.lock().unwrap();
         s.state = "waiting".to_string();
-        s.message = "等待手机扫码...".to_string();
+        s.message = "正在搜索设备...".to_string();
     }
 
-    let password = rand_password();
-    let ssid = format!("d{}", rand_password());
-
-    // Generate QR content (Wi-Fi format)
-    let qr_content = format!("WIFI:T:ADB;S:{};P:{};;", ssid, password);
-
-    // Render QR as SVG
-    let code = QrCode::new(qr_content.as_bytes()).map_err(|e| e.to_string())?;
-    let qr_svg = code.render::<svg::Color>().module_dimensions(8, 8).build();
-
-    // Start mDNS discovery in a background thread
-    let state_clone = state.status.clone();
-    let password_clone = password.clone();
+    let status_clone = state.status.clone();
+    let devices_clone = state.devices.clone();
+    let cancel_clone = state.cancel.clone();
     std::thread::spawn(move || {
-        run_pairing(state_clone, &password_clone);
+        run_discovery(status_clone, devices_clone, cancel_clone);
     });
 
-    Ok(serde_json::json!({
-        "success": true,
-        "qrDataUrl": format!("data:image/svg+xml;base64,{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, qr_svg.as_bytes())),
-        "code": password,
-    }))
+    Ok(true)
 }
 
-fn run_pairing(status: std::sync::Arc<Mutex<PairingStatus>>, password: &str) {
+#[tauri::command]
+pub async fn start_pairing(
+    password: String,
+    state: State<'_, PairingState>,
+) -> Result<bool, String> {
+    // Store password and reset state
+    {
+        *state.password.lock().unwrap() = Some(password.clone());
+        state.devices.lock().unwrap().clear();
+        state.cancel.store(false, Ordering::Relaxed);
+        let mut s = state.status.lock().unwrap();
+        s.state = "waiting".to_string();
+        s.message = "正在搜索设备...".to_string();
+    }
+
+    // Start mDNS discovery in a background thread
+    let status_clone = state.status.clone();
+    let devices_clone = state.devices.clone();
+    let cancel_clone = state.cancel.clone();
+    std::thread::spawn(move || {
+        run_discovery(status_clone, devices_clone, cancel_clone);
+    });
+
+    Ok(true)
+}
+
+fn run_discovery(
+    status: Arc<Mutex<PairingStatus>>,
+    devices: Arc<Mutex<Vec<DiscoveredDevice>>>,
+    cancel: Arc<AtomicBool>,
+) {
     let mdns = match ServiceDaemon::new() {
         Ok(m) => m,
         Err(e) => {
@@ -92,28 +120,23 @@ fn run_pairing(status: std::sync::Arc<Mutex<PairingStatus>>, password: &str) {
         }
     };
 
-    let password = password.to_string();
-
-    // Use recv_timeout to avoid blocking forever if no device is found
-    let timeout = std::time::Duration::from_secs(120);
+    let timeout = Duration::from_secs(120);
     loop {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+
         let event = match browser.recv_timeout(timeout) {
             Ok(e) => e,
             Err(_) => {
                 let mut s = status.lock().unwrap();
                 s.state = "error".to_string();
-                s.message = "未发现设备，请确保手机已开启无线调试并扫描了二维码".to_string();
+                s.message = "未发现设备，请确保手机已开启无线调试".to_string();
                 return;
             }
         };
 
         if let mdns_sd::ServiceEvent::ServiceResolved(info) = event {
-            let mut s = status.lock().unwrap();
-            s.state = "pairing".to_string();
-            s.message = "正在配对...".to_string();
-            drop(s);
-
-            // Prefer IPv4 over IPv6 — adb pair may not handle IPv6 well
             let addresses = info.get_addresses();
             let ip = addresses
                 .iter()
@@ -124,43 +147,208 @@ fn run_pairing(status: std::sync::Arc<Mutex<PairingStatus>>, password: &str) {
 
             let address = match ip {
                 Some(ip) => format!("{}:{}", ip, port),
-                None => {
-                    // Fallback to hostname if no IP found
-                    format!("{}:{}", info.get_hostname(), port)
-                }
+                None => format!("{}:{}", info.get_hostname(), port),
             };
 
-            // Run adb pair
-            let result = Command::new(get_adb_path())
-                .args(["pair", &address, &password])
-                .output();
+            let device = DiscoveredDevice {
+                name: info.get_fullname().to_string(),
+                address,
+            };
 
-            let mut s = status.lock().unwrap();
-            match result {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if output.status.success() {
-                        s.state = "success".to_string();
-                        s.message = "配对成功！".to_string();
-                    } else {
-                        let detail = if !stderr.is_empty() {
-                            stderr.trim().to_string()
-                        } else {
-                            stdout.trim().to_string()
-                        };
-                        s.state = "error".to_string();
-                        s.message = format!("配对失败 [{}]: {}", address, detail);
-                    }
-                }
-                Err(e) => {
-                    s.state = "error".to_string();
-                    s.message = format!("配对失败: {}", e);
-                }
+            // Deduplicate by address
+            let mut devs = devices.lock().unwrap();
+            if !devs.iter().any(|d| d.address == device.address) {
+                devs.push(device);
             }
-            break;
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_discovered_devices(
+    state: State<'_, PairingState>,
+) -> Result<Vec<DiscoveredDevice>, String> {
+    Ok(state.devices.lock().unwrap().clone())
+}
+
+#[tauri::command]
+pub async fn pair_device(
+    address: String,
+    state: State<'_, PairingState>,
+) -> Result<bool, String> {
+    // Stop mDNS discovery
+    state.cancel.store(true, Ordering::Relaxed);
+
+    let password = state
+        .password
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("未找到配对密码")?;
+
+    // Update status
+    {
+        let mut s = state.status.lock().unwrap();
+        s.state = "pairing".to_string();
+        s.message = "正在配对...".to_string();
+    }
+
+    // Run adb pair with timeout
+    let child = Command::new(get_adb_path())
+        .args(["pair", &address, &password])
+        .spawn()
+        .map_err(|e| format!("配对失败: {}", e))?;
+
+    let child = Arc::new(Mutex::new(Some(child)));
+    let child_clone = child.clone();
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let c = child_clone.lock().unwrap().take().unwrap();
+        let _ = tx.send(c.wait_with_output());
+    });
+
+    let mut s = state.status.lock().unwrap();
+    match rx.recv_timeout(Duration::from_secs(30)) {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if output.status.success() {
+                s.state = "success".to_string();
+                s.message = "配对成功！".to_string();
+            } else {
+                let detail = if !stderr.is_empty() {
+                    stderr.trim().to_string()
+                } else {
+                    stdout.trim().to_string()
+                };
+                s.state = "error".to_string();
+                s.message = format!("配对失败: {}", detail);
+            }
+        }
+        Ok(Err(e)) => {
+            s.state = "error".to_string();
+            s.message = format!("配对失败: {}", e);
+        }
+        Err(_) => {
+            if let Some(mut c) = child.lock().unwrap().take() {
+                let _ = c.kill();
+            }
+            s.state = "error".to_string();
+            s.message = "配对超时，请重试".to_string();
+        }
+    }
+
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn pair_device_with_code(
+    address: String,
+    code: String,
+    state: State<'_, PairingState>,
+) -> Result<bool, String> {
+    {
+        let mut s = state.status.lock().unwrap();
+        s.state = "pairing".to_string();
+        s.message = "正在配对...".to_string();
+    }
+
+    let child = Command::new(get_adb_path())
+        .args(["pair", &address, &code])
+        .spawn()
+        .map_err(|e| format!("配对失败: {}", e))?;
+
+    let child = Arc::new(Mutex::new(Some(child)));
+    let child_clone = child.clone();
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let c = child_clone.lock().unwrap().take().unwrap();
+        let _ = tx.send(c.wait_with_output());
+    });
+
+    let mut s = state.status.lock().unwrap();
+    match rx.recv_timeout(Duration::from_secs(30)) {
+        Ok(Ok(output)) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if output.status.success() {
+                s.state = "success".to_string();
+                s.message = "配对成功！".to_string();
+            } else {
+                let output = if !stderr.is_empty() {
+                    stderr.trim().to_string()
+                } else {
+                    stdout.trim().to_string()
+                };
+                let lower = output.to_lowercase();
+                if lower.contains("incorrect") || lower.contains("wrong") || lower.contains("invalid") {
+                    s.state = "error".to_string();
+                    s.message = "配对码错误，请重新输入".to_string();
+                } else {
+                    s.state = "error".to_string();
+                    s.message = format!("配对失败: {}", output);
+                }
+            }
+        }
+        Ok(Err(e)) => {
+            s.state = "error".to_string();
+            s.message = format!("配对失败: {}", e);
+        }
+        Err(_) => {
+            if let Some(mut c) = child.lock().unwrap().take() {
+                let _ = c.kill();
+            }
+            s.state = "error".to_string();
+            s.message = "配对超时，请重试".to_string();
+        }
+    }
+
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn restart_discovery(state: State<'_, PairingState>) -> Result<bool, String> {
+    // Stop current discovery
+    state.cancel.store(true, Ordering::Relaxed);
+
+    let _password = state
+        .password
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("未找到配对密码")?;
+
+    // Reset devices and status
+    state.devices.lock().unwrap().clear();
+    state.cancel.store(false, Ordering::Relaxed);
+    {
+        let mut s = state.status.lock().unwrap();
+        s.state = "waiting".to_string();
+        s.message = "正在搜索设备...".to_string();
+    }
+
+    // Start new discovery
+    let status_clone = state.status.clone();
+    let devices_clone = state.devices.clone();
+    let cancel_clone = state.cancel.clone();
+    std::thread::spawn(move || {
+        run_discovery(status_clone, devices_clone, cancel_clone);
+    });
+
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn cancel_pairing(state: State<'_, PairingState>) -> Result<bool, String> {
+    state.cancel.store(true, Ordering::Relaxed);
+    *state.password.lock().unwrap() = None;
+    state.devices.lock().unwrap().clear();
+    let mut s = state.status.lock().unwrap();
+    s.state = "idle".to_string();
+    s.message.clear();
+    Ok(true)
 }
 
 #[tauri::command]
@@ -168,13 +356,4 @@ pub async fn get_pairing_status(
     state: State<'_, PairingState>,
 ) -> Result<PairingStatus, String> {
     Ok(state.status.lock().unwrap().clone())
-}
-
-fn rand_password() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .subsec_nanos();
-    format!("{:06}", nanos % 1000000)
 }

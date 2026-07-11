@@ -119,12 +119,12 @@ async function fetchDeviceInfo(serial: string): Promise<Partial<Device>> {
   // 并行执行所有 adb shell 命令，提升获取速度
   const [batteryOut, storageOut, versionOut, sizeOut, ipOut, powerOut, nameOut, brandOut] =
     await Promise.all([
-      run(['dumpsys', 'battery']),         // 电池信息
-      run(['df', '/data', '-h']),          // 存储空间
+      run(['dumpsys', 'battery']), // 电池信息
+      run(['df', '/data', '-h']), // 存储空间
       run(['getprop', 'ro.build.version.release']), // Android 版本
-      run(['wm', 'size']),                 // 屏幕分辨率
+      run(['wm', 'size']), // 屏幕分辨率
       run(['ip', 'addr', 'show', 'wlan0']), // Wi-Fi IP 地址
-      run(['dumpsys', 'power']),           // 电源/屏幕状态
+      run(['dumpsys', 'power']), // 电源/屏幕状态
       run(['getprop', 'ro.product.marketname']), // 市场名称
       run(['getprop', 'ro.product.brand']) // 品牌
     ])
@@ -162,8 +162,8 @@ async function fetchDeviceInfo(serial: string): Promise<Partial<Device>> {
   const brand = brandOut.trim()
   const deviceName = marketName
     ? brand && !marketName.startsWith(brand)
-      ? `${brand} ${marketName}`  // 品牌 + 市场名（如 "Xiaomi Redmi Note 12"）
-      : marketName               // 市场名已包含品牌（如 "Xiaomi 14"）
+      ? `${brand} ${marketName}` // 品牌 + 市场名（如 "Xiaomi Redmi Note 12"）
+      : marketName // 市场名已包含品牌（如 "Xiaomi 14"）
     : ''
 
   return {
