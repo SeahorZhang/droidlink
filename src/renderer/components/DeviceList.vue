@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed } from 'vue'
 import type { Device } from '../composables/useDevices'
 import { Icon } from '@iconify/vue'
-import ConfirmDialog from './ConfirmDialog.vue'
 import BaseButton from './BaseButton.vue'
 import BaseBadge from './BaseBadge.vue'
-import SettingsPanel from './SettingsPanel.vue'
 
 const props = defineProps<{
   device: Device
@@ -15,29 +13,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   startScrcpy: [serial: string]
   stopScrcpy: []
-  disconnect: [serial: string]
 }>()
-
-const showConfirm = ref(false)
-const showSettings = ref(false)
-
-// Settings state
-const loadSettings = (): { maxSize: number; bitRate: string } => {
-  const saved = localStorage.getItem('scrcpySettings')
-  if (saved) {
-    try {
-      return { maxSize: 0, bitRate: '50M', ...JSON.parse(saved) }
-    } catch {}
-  }
-  return { maxSize: 0, bitRate: '50M' }
-}
-const settings = ref(loadSettings())
-watch(settings, (s) => localStorage.setItem('scrcpySettings', JSON.stringify(s)), { deep: true })
-
-function handleConfirm() {
-  showConfirm.value = false
-  emit('disconnect', '')
-}
 
 interface InfoItem {
   icon: string
@@ -124,15 +100,6 @@ const statItems = computed<StatItem[]>(() => [
           <BaseBadge :label="device.type === 'wireless' ? 'Wi-Fi' : 'USB'" />
         </div>
       </div>
-      <div class="flex items-center">
-        <BaseButton
-          v-if="device.type === 'wireless'"
-          icon="lucide:unplug"
-          icon-only
-          @click="showConfirm = true"
-        />
-        <BaseButton icon="lucide:settings" icon-only @click="showSettings = true" />
-      </div>
     </div>
 
     <!-- Info content -->
@@ -205,35 +172,4 @@ const statItems = computed<StatItem[]>(() => [
       </BaseButton>
     </div>
   </div>
-
-  <ConfirmDialog
-    :visible="showConfirm"
-    title="断开连接"
-    message="设备将被断开连接。
-
-手机端的配对记录仍会保留，设备可能会自动重连。
-
-如需彻底断开，请在手机上手动移除：
-开发者选项 > 无线调试 > 已配对的设备 > 移除"
-    @confirm="handleConfirm"
-    @cancel="showConfirm = false"
-  />
-
-  <!-- Settings Dialog -->
-  <Teleport to="body">
-    <div
-      v-if="showSettings"
-      class="fixed inset-0 z-50 flex items-center justify-center"
-      @click.self="showSettings = false"
-    >
-      <div class="fixed inset-0 bg-black/30 backdrop-blur-sm" @click="showSettings = false" />
-      <div class="relative z-10 w-[320px] rounded-xl border border-black/8 bg-white p-5 shadow-xl">
-        <div class="mb-4 flex items-center justify-between">
-          <span class="text-sm font-medium text-black/70">设置</span>
-          <BaseButton icon="lucide:x" icon-only @click="showSettings = false" />
-        </div>
-        <SettingsPanel :settings="settings" @update:settings="(s) => (settings = s)" />
-      </div>
-    </div>
-  </Teleport>
 </template>

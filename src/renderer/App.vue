@@ -16,6 +16,19 @@ const { isRunning: isScrcpyRunning, start: startScrcpy, stop: stopScrcpy } = use
 const currentSerial = ref('')
 const currentDevice = computed(() => devices.value.find((d) => d.serial === currentSerial.value))
 
+// Settings state
+const loadSettings = (): { maxSize: number; bitRate: string } => {
+  const saved = localStorage.getItem('scrcpySettings')
+  if (saved) {
+    try {
+      return { maxSize: 0, bitRate: '50M', ...JSON.parse(saved) }
+    } catch {}
+  }
+  return { maxSize: 0, bitRate: '50M' }
+}
+const settings = ref(loadSettings())
+watch(settings, (s) => localStorage.setItem('scrcpySettings', JSON.stringify(s)), { deep: true })
+
 // Auto-select first device when devices change
 watch(
   devices,
@@ -47,9 +60,13 @@ function handleDisconnect() {
     <AppHeader
       :devices="devices"
       :current-serial="currentSerial"
+      :current-device="currentDevice"
       :is-loading="isLoading"
+      :settings="settings"
       @select-device="selectDevice"
       @pair-new="pairNew"
+      @update:settings="(s) => (settings = s)"
+      @disconnect="handleDisconnect"
     />
 
     <div class="flex flex-1 justify-center gap-5 pt-4 pb-6">
@@ -59,7 +76,6 @@ function handleDisconnect() {
         :is-scrcpy-running="isScrcpyRunning"
         @start-scrcpy="startScrcpy"
         @stop-scrcpy="stopScrcpy"
-        @disconnect="handleDisconnect"
       />
       <PairingQr v-if="!hasDevice || !currentDevice" :has-device="hasDevice" />
       <RightPanel v-if="hasDevice && currentDevice" :serial="currentDevice.serial" />
