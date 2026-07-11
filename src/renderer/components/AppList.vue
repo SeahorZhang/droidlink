@@ -50,11 +50,29 @@ watch(
   { immediate: true }
 )
 
-const launchApp = async (packageName: string) => {
-  await recordClick(packageName)
-  // Launch via scrcpy with app
+const launchApp = async (pkg: string) => {
+  await recordClick(pkg)
+  const app = displayApps.value.find((a) => a.packageName === pkg)
+  const title = app ? `${app.label} 1920x1080` : pkg
   const { invoke } = await import('@tauri-apps/api/core')
-  await invoke('start_scrcpy', { options: { serial: props.serial, maxSize: 0, bitRate: '24M' } })
+  try {
+    await invoke('start_scrcpy', {
+      options: {
+        args: [
+          '-s', props.serial,
+          `--new-display=1920x1080/320`,
+          `--start-app=${pkg}`,
+          '--video-codec=h265',
+          '-b', '24M',
+          '--window-x=auto',
+          '--window-y=auto',
+          `--window-title=${title}`,
+        ],
+      },
+    })
+  } catch (e) {
+    console.error('launchApp failed:', e)
+  }
 }
 
 const reinstall = async () => {

@@ -53,8 +53,7 @@ fn kill_scrcpy_clean(pid: Option<u32>) {
 
 #[derive(serde::Deserialize)]
 pub struct ScrcpyOptions {
-    pub serial: Option<String>,
-    pub bit_rate: Option<String>,
+    pub args: Vec<String>,
 }
 
 #[tauri::command]
@@ -67,34 +66,7 @@ pub async fn start_scrcpy(
     let old_pid = state.pid.lock().unwrap().take();
     kill_scrcpy_clean(old_pid);
 
-    let mut args: Vec<String> = Vec::new();
-
-    if let Some(serial) = &options.serial {
-        args.push("-s".to_string());
-        args.push(serial.clone());
-    }
-
-    if let Some(bit_rate) = &options.bit_rate {
-        args.push("-b".to_string());
-        args.push(bit_rate.clone());
-    }
-
-    args.push("--video-codec".to_string());
-    args.push("h265".to_string());
-    args.push("--window-x".to_string());
-    args.push("auto".to_string());
-    args.push("--window-y".to_string());
-    args.push("auto".to_string());
-
-    // Set window title to device name
-    if let Some(serial) = &options.serial {
-        if let Ok(info) = crate::adb::get_device_info(serial.clone()).await {
-            args.push("--window-title".to_string());
-            args.push(info.device_name);
-        }
-    }
-
-    let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let args_str: Vec<&str> = options.args.iter().map(|s| s.as_str()).collect();
     let mut child = Command::new(get_scrcpy_path())
         .args(&args_str)
         .spawn()

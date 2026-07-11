@@ -14,8 +14,17 @@ export function useScrcpy() {
     isRunning,
     start: async (serial?: string, opts?: { maxSize?: number; bitRate?: string }) => {
       isRunning.value = true
+      const args = [
+        ...(serial ? ['-s', serial] : []),
+        '--video-codec', 'h265',
+        '--window-x', 'auto',
+        '--window-y', 'auto',
+      ]
+      if (opts?.bitRate) {
+        args.push('-b', opts.bitRate)
+      }
       try {
-        await invoke('start_scrcpy', { options: { serial, ...opts } })
+        await invoke('start_scrcpy', { options: { args } })
       } catch {
         isRunning.value = false
       }
