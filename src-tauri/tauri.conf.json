@@ -39,8 +39,9 @@
       "../resources/scrcpy/scrcpy-server"
     ],
     "macOS": {
-      "entitlements": null,
-      "minimumSystemVersion": "10.15"
+      "entitlements": "./entitlements.plist",
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "-"
     }
   }
 }
