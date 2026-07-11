@@ -15,22 +15,29 @@ impl ScrcpyState {
     }
 }
 
+fn find_resource(name: &str) -> String {
+    let exe = std::env::current_exe().ok();
+    if let Some(exe) = &exe {
+        let dev_path = exe.parent().unwrap().join(format!("resources/scrcpy/{}", name));
+        if dev_path.exists() {
+            return dev_path.to_string_lossy().to_string();
+        }
+        if let Some(contents) = exe.parent().and_then(|p| p.parent()) {
+            let bundle_path = contents.join(format!("Resources/resources/scrcpy/{}", name));
+            if bundle_path.exists() {
+                return bundle_path.to_string_lossy().to_string();
+            }
+        }
+    }
+    name.to_string()
+}
+
 fn get_scrcpy_path() -> String {
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("resources/scrcpy/scrcpy")))
-        .filter(|p| p.exists())
-        .map(|p| p.to_string_lossy().to_string());
-    bundled.unwrap_or_else(|| "scrcpy".to_string())
+    find_resource("scrcpy")
 }
 
 fn get_adb_path() -> String {
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("resources/scrcpy/adb")))
-        .filter(|p| p.exists())
-        .map(|p| p.to_string_lossy().to_string());
-    bundled.unwrap_or_else(|| "adb".to_string())
+    find_resource("adb")
 }
 
 fn kill_scrcpy_clean(pid: Option<u32>) {

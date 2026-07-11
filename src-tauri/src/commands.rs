@@ -2,12 +2,25 @@ use std::process::Command;
 use tauri::Manager;
 
 fn get_adb_path() -> String {
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("resources/scrcpy/adb")))
-        .filter(|p| p.exists())
-        .map(|p| p.to_string_lossy().to_string());
-    bundled.unwrap_or_else(|| "adb".to_string())
+    // 1. dev 模式: target/debug/resources/scrcpy/adb (不存在则跳过)
+    // 2. .app bundle: Contents/Resources/resources/scrcpy/adb
+    // 3. 回退系统 adb
+    let exe = std::env::current_exe().ok();
+    if let Some(exe) = &exe {
+        // dev 模式：exe 在 target/debug/ 或 target/release/
+        let dev_path = exe.parent().unwrap().join("resources/scrcpy/adb");
+        if dev_path.exists() {
+            return dev_path.to_string_lossy().to_string();
+        }
+        // .app bundle: exe 在 Contents/MacOS/，资源在 Contents/Resources/
+        if let Some(contents) = exe.parent().and_then(|p| p.parent()) {
+            let bundle_path = contents.join("Resources/resources/scrcpy/adb");
+            if bundle_path.exists() {
+                return bundle_path.to_string_lossy().to_string();
+            }
+        }
+    }
+    "adb".to_string()
 }
 
 /// 获取 companion-app.apk 的路径
