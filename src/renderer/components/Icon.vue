@@ -17,7 +17,9 @@ const icons: Record<string, string> = {
   close: 'M6 18L18 6M6 6l12 12',
   check: 'M5 13l4 4L19 7',
   battery:
-    'M4 10a1 1 0 011-1h12a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zm16 0h1.5a.5.5 0 01.5.5v3a.5.5 0 01-.5.5H20v-4z'
+    'M4 10a1 1 0 011-1h12a1 1 0 011 1v4a1 1 0 01-1 1H5a1 1 0 01-1-1v-4zm16 0h1.5a.5.5 0 01.5.5v3a.5.5 0 01-.5.5H20v-4z',
+  plus: 'M12 5v14M5 12h14',
+  'chevron-down': 'M6 9l6 6 6-6'
 }
 </script>
 
