@@ -7,5 +7,7 @@ export const tauri = {
   readFile: (path: string): Promise<string> => invoke('read_file', { path }),
   writeFile: (path: string, content: string): Promise<void> =>
     invoke('write_file', { path, content }),
-  getDataDir: (): Promise<string> => invoke('get_data_dir')
+  getDataDir: (): Promise<string> => invoke('get_data_dir'),
+  getResourceDir: (): Promise<string> => invoke('get_resource_dir'),
+  getCompanionApkPath: (): Promise<string> => invoke('get_companion_apk_path')
 }

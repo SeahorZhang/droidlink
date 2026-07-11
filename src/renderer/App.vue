@@ -56,7 +56,7 @@ function handleDisconnect() {
 </script>
 
 <template>
-  <div class="flex min-h-screen flex-col">
+  <div class="flex h-screen min-h-screen flex-col overflow-hidden">
     <AppHeader
       :devices="devices"
       :current-serial="currentSerial"
@@ -69,7 +69,7 @@ function handleDisconnect() {
       @disconnect="handleDisconnect"
     />
 
-    <div class="flex flex-1 justify-center gap-5 pt-4 pb-6">
+    <div class="flex flex-1 justify-center gap-5 overflow-hidden pt-4 pb-6">
       <DeviceList
         v-if="hasDevice && currentDevice"
         :device="currentDevice"

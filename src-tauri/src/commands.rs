@@ -10,6 +10,40 @@ fn get_adb_path() -> String {
     bundled.unwrap_or_else(|| "adb".to_string())
 }
 
+/// 获取 companion-app.apk 的路径
+/// dev 模式下从项目 resources 目录读取，build 模式下从打包资源读取
+fn find_companion_apk(app: &tauri::AppHandle) -> Result<String, String> {
+    // 1. 尝试从打包的资源目录获取（build 模式）
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let apk = resource_dir.join("companion-app.apk");
+        if apk.exists() {
+            return Ok(apk.to_string_lossy().to_string());
+        }
+    }
+
+    // 2. dev 模式：从项目根目录的 resources 获取
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_default();
+
+    // 向上查找项目根目录（包含 src-tauri 的目录）
+    let mut search_dir = exe_dir.clone();
+    for _ in 0..5 {
+        if search_dir.join("src-tauri").exists() || search_dir.join("resources").exists() {
+            let apk = search_dir.join("resources/companion-app.apk");
+            if apk.exists() {
+                return Ok(apk.to_string_lossy().to_string());
+            }
+        }
+        if !search_dir.pop() {
+            break;
+        }
+    }
+
+    Err("companion-app.apk not found".to_string())
+}
+
 #[tauri::command]
 pub async fn adb(args: Vec<String>) -> Result<String, String> {
     let adb_path = get_adb_path();
@@ -42,4 +76,16 @@ pub async fn write_file(path: String, content: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn get_data_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn get_resource_dir(app: tauri::AppHandle) -> Result<String, String> {
+    Ok(app.path().resource_dir().map_err(|e| e.to_string())?.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn get_companion_apk_path(app: tauri::AppHandle) -> Result<String, String> {
+    let path = find_companion_apk(&app)?;
+    eprintln!("[DroidLink] APK path: {}", path);
+    Ok(path)
 }

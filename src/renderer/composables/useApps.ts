@@ -50,16 +50,24 @@ export function useApps(serial: Ref<string>) {
   }
 
   const install = async () => {
-    const dir = await tauri.getDataDir()
-    await tauri.adb(['-s', serial.value, 'install', '-r', '-g', `${dir}/../companion-app.apk`])
-    for (const op of ['QUERY_ALL_PACKAGES', '10022', '10004', '10021']) {
-      await tauri
-        .adb(['-s', serial.value, 'shell', 'appops', 'set', COMPANION, op, 'allow'])
-        .catch(() => {})
-    }
+    const apkPath = await tauri.getCompanionApkPath()
+    await tauri.adb(['-s', serial.value, 'install', '-r', '-g', apkPath])
+    await grantPermissions()
     await tauri
       .adb(['-s', serial.value, 'shell', 'am', 'start', '-n', `${COMPANION}/.MainActivity`])
       .catch(() => {})
+  }
+
+  const grantPermissions = async () => {
+    const run = async (args: string[]) => {
+      await tauri.adb(['-s', serial.value, 'shell', ...args]).catch(() => {})
+    }
+    // Android 标准权限
+    await run(['pm', 'grant', COMPANION, 'android.permission.QUERY_ALL_PACKAGES'])
+    // MIUI 特殊权限 (appops)
+    for (const op of ['QUERY_ALL_PACKAGES', '10004', '10008', '10017', '10020', '10021', '10022', '10033', '10045', '10053']) {
+      await run(['appops', 'set', COMPANION, op, 'allow'])
+    }
   }
 
   const fetchFromCompanion = async () => {
@@ -75,12 +83,25 @@ export function useApps(serial: Ref<string>) {
     const json = await tauri.httpGet(`http://127.0.0.1:${PORT}/apps`)
     const r = JSON.parse(json)
     if (r.error) throw new Error(r.error)
+    
+    // 获取每个应用的图标
+    const apps = await Promise.all(
+      (r.apps || []).map(async (a: Record<string, string>) => {
+        let icon = ''
+        try {
+          // /icon 端点直接返回 Base64 字符串
+          icon = await tauri.httpGet(`http://127.0.0.1:${PORT}/icon?pkg=${a.packageName}`)
+        } catch {}
+        return {
+          packageName: a.packageName,
+          label: a.label,
+          icon
+        }
+      })
+    )
+    
     return {
-      apps: (r.apps || []).map((a: Record<string, string>) => ({
-        packageName: a.packageName,
-        label: a.label,
-        icon: ''
-      })),
+      apps,
       version: r.version || ''
     }
   }
@@ -88,45 +109,49 @@ export function useApps(serial: Ref<string>) {
   async function loadApps(force = false) {
     isLoading.value = true
     try {
+      // 先检查并安装伴侣应用（无论是否有缓存）
+      if (!(await isInstalled())) {
+        await install()
+      } else {
+        // 确保权限正确（MIUI 可能需要重新授权）
+        await grantPermissions()
+      }
+
+      const cached = getCache(serial.value)
+      
+      // 如果有缓存且不是强制刷新，直接使用缓存
+      if (!force && cached) {
+        apps.value = sort(cached.apps || [])
+        isLoading.value = false
+        return
+      }
+
+      // 从伴侣应用获取应用列表（包含名称和图标）
+      const result = await fetchFromCompanion()
+      
+      // 从 adb 获取第三方应用列表（作为备份）
       const raw = await tauri.adb(['-s', serial.value, 'shell', 'pm', 'list', 'packages', '-3'])
-      const pkgs = raw
+      const adbPkgs = raw
         .split('\n')
         .filter((l) => l.startsWith('package:'))
         .map((l) => l.replace('package:', '').trim())
         .filter(Boolean)
 
-      const cached = getCache(serial.value)
-      const cachedMap = new Map<string, AppInfo>(
-        (cached?.apps || []).map((a: AppInfo) => [a.packageName, a])
+      // 合并：以伴侣应用返回的数据为主
+      const companionMap = new Map<string, AppInfo>(
+        result.apps.map((a) => [a.packageName, a])
       )
-      const merged: AppInfo[] = pkgs.map((pkg) => ({
-        packageName: pkg,
-        label: cachedMap.get(pkg)?.label || '',
-        icon: cachedMap.get(pkg)?.icon || ''
-      }))
-
-      if (!force && cached) {
-        apps.value = sort(merged)
-        isLoading.value = false
-        return
+      
+      // 添加 adb 中有但伴侣应用中没有的应用
+      for (const pkg of adbPkgs) {
+        if (!companionMap.has(pkg)) {
+          result.apps.push({ packageName: pkg, label: '', icon: '' })
+        }
       }
 
-      if (!(await isInstalled())) await install()
-      const result = await fetchFromCompanion()
-      const mergedSet = new Set(merged.map((a) => a.packageName))
-      for (const a of result.apps) if (!mergedSet.has(a.packageName)) merged.push(a)
-
-      const iconMap = new Map<string, string>(
-        cached?.apps
-          ?.filter((a: AppInfo) => a.icon)
-          .map((a: AppInfo) => [a.packageName, a.icon || '']) || []
-      )
-      const withIcons = merged.map((a) => ({
-        ...a,
-        icon: a.icon || iconMap.get(a.packageName) || ''
-      }))
-      setCache(serial.value, withIcons, result.version)
-      apps.value = sort(withIcons)
+      // 缓存并更新 UI
+      setCache(serial.value, result.apps, result.version)
+      apps.value = sort(result.apps)
     } catch (e) {
       console.error('loadApps:', e)
     }

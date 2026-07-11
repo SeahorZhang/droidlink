@@ -32,6 +32,7 @@
     "active": true,
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.icns", "icons/icon.ico"],
     "targets": ["dmg", "app"],
+    "resources": ["../resources/companion-app.apk"],
     "macOS": {
       "entitlements": null,
       "minimumSystemVersion": "10.15"

@@ -27,6 +27,8 @@ pub fn run() {
             commands::read_file,
             commands::write_file,
             commands::get_data_dir,
+            commands::get_resource_dir,
+            commands::get_companion_apk_path,
             pairing::start_pairing,
             pairing::start_discovery,
             pairing::get_pairing_status,
