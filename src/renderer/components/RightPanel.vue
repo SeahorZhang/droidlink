@@ -23,9 +23,9 @@ const tabs = [
 
 <template>
   <div
-    class="w-[520px] rounded-3xl border border-white/[0.08] bg-white/[0.06] shadow-[0_8px_32px_rgba(0,0,0,0.4)] backdrop-blur-xl"
+    class="w-[520px] rounded-xl border border-black/8 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
   >
-    <div class="flex h-10 items-center justify-center border-b border-white/[0.06]">
+    <div class="flex h-10 items-center justify-center border-b border-black/8">
       <MacosTab v-model="activeTab" :tabs="tabs" />
     </div>
 

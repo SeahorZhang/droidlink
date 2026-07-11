@@ -64,7 +64,7 @@ onBeforeUnmount(() => {
     <!-- Toolbar -->
     <div class="mb-3 flex items-center justify-end gap-1.5">
       <button
-        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-white/30 transition-colors hover:bg-white/5 hover:text-white/50"
+        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-black/40 transition-colors hover:bg-black/5 hover:text-black/60"
         :class="{ 'pointer-events-none opacity-50': isRefreshing }"
         @click="refreshApps()"
       >
@@ -85,13 +85,13 @@ onBeforeUnmount(() => {
         刷新
       </button>
       <button
-        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-white/30 transition-colors hover:bg-white/5 hover:text-white/50"
+        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-black/40 transition-colors hover:bg-black/5 hover:text-black/60"
         @click="reinstall()"
       >
         重装
       </button>
       <button
-        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-white/30 transition-colors hover:bg-white/5 hover:text-white/50"
+        class="flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-[10px] text-black/40 transition-colors hover:bg-black/5 hover:text-black/60"
         @click="clearCache()"
       >
         清除缓存
@@ -104,19 +104,19 @@ onBeforeUnmount(() => {
         v-model="searchText"
         type="text"
         placeholder="搜索..."
-        class="w-full rounded-lg border border-white/[0.06] bg-white/[0.04] px-3 py-1.5 text-[11px] text-white/70 placeholder-white/25 transition-colors outline-none focus:border-white/15"
+        class="w-full rounded-lg border border-black/10 bg-gray-100 px-3 py-1.5 text-[11px] text-black/80 placeholder-black/30 transition-colors outline-none focus:border-blue-500/50"
       />
     </div>
 
     <!-- Loading -->
     <div v-if="isLoading" class="flex items-center justify-center py-6">
       <span
-        class="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60"
+        class="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-500"
       ></span>
     </div>
 
     <!-- Empty -->
-    <div v-else-if="displayApps.length === 0" class="py-6 text-center text-[11px] text-white/25">
+    <div v-else-if="displayApps.length === 0" class="py-6 text-center text-[11px] text-black/30">
       暂无应用
     </div>
 
@@ -125,7 +125,7 @@ onBeforeUnmount(() => {
       <div
         v-for="app in displayApps"
         :key="app.packageName"
-        class="flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-white/[0.04] bg-white/[0.03] p-2 transition-all hover:border-white/[0.1] hover:bg-white/[0.08]"
+        class="flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-black/8 bg-gray-50 p-2 transition-all hover:border-black/12 hover:bg-gray-100"
         @click="launchApp(app.packageName)"
       >
         <img
@@ -135,9 +135,9 @@ onBeforeUnmount(() => {
         />
         <div
           v-else
-          class="pointer-events-none flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.06]"
+          class="pointer-events-none flex h-8 w-8 items-center justify-center rounded-lg bg-gray-200"
         >
-          <svg class="h-4 w-4 text-white/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="h-4 w-4 text-black/20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
             />
           </svg>
         </div>
-        <span class="pointer-events-none w-full truncate text-center text-[10px] text-white/50">{{
+        <span class="pointer-events-none w-full truncate text-center text-[10px] text-black/60">{{
           app.label
         }}</span>
       </div>

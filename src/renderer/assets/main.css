@@ -3,11 +3,8 @@
 body {
   margin: 0;
   padding: 0;
-  background-color: #1b1b1f;
+  background-color: #f5f5f7;
   overflow: hidden;
-  background-image: url('./wavy-lines.svg');
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;
-  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  color-scheme: light;
 }

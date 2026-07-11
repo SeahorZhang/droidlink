@@ -15,25 +15,25 @@ const emit = defineEmits<{
   <Teleport to="body">
     <div
       v-if="visible"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
       @click.self="emit('cancel')"
     >
       <div
-        class="w-80 rounded-2xl border border-white/10 bg-[#2a2a2e] p-5 shadow-[0_16px_48px_rgba(0,0,0,0.5)]"
+        class="w-80 rounded-xl border border-black/8 bg-white p-5 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
       >
-        <h3 class="mb-2 text-[13px] font-medium text-white/80">{{ title }}</h3>
-        <p class="mb-5 whitespace-pre-line text-[11px] leading-relaxed text-white/40">
+        <h3 class="mb-2 text-[13px] font-medium text-black/80">{{ title }}</h3>
+        <p class="mb-5 whitespace-pre-line text-[11px] leading-relaxed text-black/50">
           {{ message }}
         </p>
         <div class="flex justify-end gap-2">
           <button
-            class="cursor-pointer rounded-lg px-4 py-1.5 text-[11px] font-medium text-white/40 transition-colors hover:bg-white/5 hover:text-white/60"
+            class="cursor-pointer rounded-lg px-4 py-1.5 text-[11px] font-medium text-black/50 transition-colors hover:bg-black/5"
             @click="emit('cancel')"
           >
             取消
           </button>
           <button
-            class="cursor-pointer rounded-lg bg-red-500/80 px-4 py-1.5 text-[11px] font-medium text-white/90 transition-colors hover:bg-red-500"
+            class="cursor-pointer rounded-lg bg-red-500 px-4 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-red-600"
             @click="emit('confirm')"
           >
             确认移除

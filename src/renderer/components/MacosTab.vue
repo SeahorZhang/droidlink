@@ -11,7 +11,7 @@ const emit = defineEmits<{
 
 <template>
   <div
-    class="inline-flex rounded-lg bg-white/[0.06] p-0.5 ring-1 ring-inset ring-white/[0.06]"
+    class="inline-flex rounded-lg bg-black/5 p-0.5"
   >
     <button
       v-for="tab in tabs"
@@ -19,8 +19,8 @@ const emit = defineEmits<{
       :class="[
         'relative cursor-pointer rounded-md px-4 py-1.5 text-[11px] font-medium tracking-wide transition-all',
         modelValue === tab.key
-          ? 'bg-white/[0.12] text-white/80 shadow-[0_1px_2px_rgba(0,0,0,0.3)]'
-          : 'text-white/30 hover:text-white/50'
+          ? 'bg-white text-black/80 shadow-[0_1px_2px_rgba(0,0,0,0.1)]'
+          : 'text-black/40 hover:text-black/60'
       ]"
       @click="emit('update:modelValue', tab.key)"
     >
