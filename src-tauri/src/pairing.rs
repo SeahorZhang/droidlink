@@ -202,10 +202,12 @@ pub async fn pair_device(
     }
 
     // Run adb pair with timeout
-    let child = Command::new(get_adb_path())
+    let adb_path = get_adb_path();
+    eprintln!("[DroidLink] adb pair: {} pair {} <code>", adb_path, address);
+    let child = Command::new(&adb_path)
         .args(["pair", &address, &password])
         .spawn()
-        .map_err(|e| format!("配对失败: {}", e))?;
+        .map_err(|e| format!("配对失败: {} (adb: {})", e, adb_path))?;
 
     let child = Arc::new(Mutex::new(Some(child)));
     let child_clone = child.clone();
@@ -221,6 +223,7 @@ pub async fn pair_device(
         Ok(Ok(output)) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
+            eprintln!("[DroidLink] adb pair result: success={}, stdout={}, stderr={}", output.status.success(), stdout.trim(), stderr.trim());
             if output.status.success() {
                 s.state = "success".to_string();
                 s.message = "配对成功！".to_string();
@@ -262,10 +265,12 @@ pub async fn pair_device_with_code(
         s.message = "正在配对...".to_string();
     }
 
-    let child = Command::new(get_adb_path())
+    let adb_path = get_adb_path();
+    eprintln!("[DroidLink] adb pair: {} pair {} <code>", adb_path, address);
+    let child = Command::new(&adb_path)
         .args(["pair", &address, &code])
         .spawn()
-        .map_err(|e| format!("配对失败: {}", e))?;
+        .map_err(|e| format!("配对失败: {} (adb: {})", e, adb_path))?;
 
     let child = Arc::new(Mutex::new(Some(child)));
     let child_clone = child.clone();
