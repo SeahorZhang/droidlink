@@ -1,0 +1,105 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # Download platform-specific scrcpy + adb + scrcpy-server
+      - name: Download scrcpy (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          SCRCPY_VERSION="4.0"
+          curl -sL "https://github.com/Genymobile/scrcpy/releases/download/v${SCRCPY_VERSION}/scrcpy-linux-x86_64-v${SCRCPY_VERSION}.tar.gz" \
+            | tar -xz --strip-components=1 -C resources/scrcpy \
+              --exclude='*.png' --exclude='*.desktop' --exclude='*.appdata.xml'
+          chmod +x resources/scrcpy/scrcpy resources/scrcpy/adb
+
+      - name: Download scrcpy (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $SCRCPY_VERSION = "4.0"
+          $url = "https://github.com/Genymobile/scrcpy/releases/download/v${SCRCPY_VERSION}/scrcpy-win64-v${SCRCPY_VERSION}.zip"
+          Invoke-WebRequest -Uri $url -OutFile scrcpy.zip
+          Expand-Archive -Path scrcpy.zip -DestinationPath scrcpy-extract
+          $dir = Get-ChildItem scrcpy-extract | Select-Object -First 1
+          Copy-Item "$dir\*.exe" resources\scrcpy\
+          Copy-Item "$dir\*.dll" resources\scrcpy\
+
+      - name: Download scrcpy (macOS ARM)
+        if: matrix.platform == 'macos-latest' && matrix.target == 'aarch64-apple-darwin'
+        run: |
+          SCRCPY_VERSION="4.0"
+          curl -sL "https://github.com/Genymobile/scrcpy/releases/download/v${SCRCPY_VERSION}/scrcpy-macos-aarch64-v${SCRCPY_VERSION}.tar.gz" \
+            | tar -xz --strip-components=1 -C resources/scrcpy \
+              --exclude='*.png' --exclude='*.desktop'
+          chmod +x resources/scrcpy/scrcpy resources/scrcpy/adb
+
+      - name: Download scrcpy (macOS x86)
+        if: matrix.platform == 'macos-latest' && matrix.target == 'x86_64-apple-darwin'
+        run: |
+          SCRCPY_VERSION="4.0"
+          curl -sL "https://github.com/Genymobile/scrcpy/releases/download/v${SCRCPY_VERSION}/scrcpy-macos-x86_64-v${SCRCPY_VERSION}.tar.gz" \
+            | tar -xz --strip-components=1 -C resources/scrcpy \
+              --exclude='*.png' --exclude='*.desktop'
+          chmod +x resources/scrcpy/scrcpy resources/scrcpy/adb
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          args: --target ${{ matrix.target }} --bundles dmg,app,nsis,deb,appimage
+          uploadRelease: ${{ startsWith(github.ref, 'refs/tags/v') }}
