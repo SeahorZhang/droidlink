@@ -41,12 +41,20 @@ impl PairingState {
 }
 
 fn get_adb_path() -> String {
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("resources/scrcpy/adb")))
-        .filter(|p| p.exists())
-        .map(|p| p.to_string_lossy().to_string());
-    bundled.unwrap_or_else(|| "adb".to_string())
+    let exe = std::env::current_exe().ok();
+    if let Some(exe) = &exe {
+        let dev_path = exe.parent().unwrap().join("resources/scrcpy/adb");
+        if dev_path.exists() {
+            return dev_path.to_string_lossy().to_string();
+        }
+        if let Some(contents) = exe.parent().and_then(|p| p.parent()) {
+            let bundle_path = contents.join("Resources/resources/scrcpy/adb");
+            if bundle_path.exists() {
+                return bundle_path.to_string_lossy().to_string();
+            }
+        }
+    }
+    "adb".to_string()
 }
 
 #[tauri::command]
