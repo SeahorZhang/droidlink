@@ -16,6 +16,7 @@
     "typecheck": "vue-tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@iconify/vue": "^5.0.1",
     "@tauri-apps/api": "^2",
     "reka-ui": "^2.10.1",
     "uqr": "^0.1.3"

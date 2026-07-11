@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import Icon from './Icon.vue'
+import { Icon } from '@iconify/vue'
 import MacosTab from './MacosTab.vue'
 import { usePairing } from '../composables/usePairing'
 
@@ -44,14 +44,14 @@ watch(pairingCode, (code) => {
 
 const overlayState = computed(() => {
   if (pairState.value === 'pairing') {
-    return { icon: 'loading', color: 'text-amber-500', text: '正在配对', clickable: false }
+    return { icon: '', color: 'text-amber-500', text: '正在配对', clickable: false }
   }
   if (pairState.value === 'success') {
-    return { icon: 'check', color: 'text-green-500', text: '配对成功', clickable: false }
+    return { icon: 'lucide:check', color: 'text-green-500', text: '配对成功', clickable: false }
   }
   if (pairState.value === 'error') {
     return {
-      icon: 'close',
+      icon: 'lucide:x',
       color: 'text-red-500',
       text: pairMessage.value || '配对失败，点击重试',
       clickable: true
@@ -107,8 +107,8 @@ function handleOverlayClick() {
           @click="handleOverlayClick"
         >
           <Icon
-            v-if="overlayState!.icon !== 'loading'"
-            :name="overlayState!.icon"
+            v-if="overlayState!.icon"
+            :icon="overlayState!.icon"
             class="mb-1 size-8"
             :class="overlayState!.color"
           />
@@ -161,12 +161,12 @@ function handleOverlayClick() {
           ></div>
           <Icon
             v-else-if="pairState === 'success'"
-            name="check"
+            icon="lucide:check"
             class="size-4 text-green-500"
           />
           <Icon
             v-else-if="pairState === 'error'"
-            name="close"
+            icon="lucide:x"
             class="size-4 text-red-500"
           />
           <span

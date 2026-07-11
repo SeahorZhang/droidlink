@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 import { PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
 import type { Device } from '../composables/useDevices'
-import Icon from './Icon.vue'
+import { Icon } from '@iconify/vue'
+import BaseBadge from './BaseBadge.vue'
 
 defineProps<{
   devices: Device[]
@@ -23,11 +24,11 @@ const open = ref(false)
     <PopoverTrigger
       class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-black/8 bg-white px-3 py-1.5 text-[11px] text-black/60 transition-colors hover:bg-gray-50"
     >
-      <Icon name="phone" class="h-3 w-3" />
+      <Icon icon="lucide:smartphone" class="h-3 w-3" />
       <span class="max-w-[120px] truncate">
         {{ devices.find((d) => d.serial === currentSerial)?.deviceName || '选择设备' }}
       </span>
-      <Icon name="chevron-down" class="h-3 w-3 text-black/30" />
+      <Icon icon="lucide:chevron-down" class="h-3 w-3 text-black/30" />
     </PopoverTrigger>
 
     <PopoverPortal>
@@ -51,12 +52,10 @@ const open = ref(false)
           <span class="flex-1 truncate text-[11px] text-black/70">
             {{ device.deviceName || device.model }}
           </span>
-          <span
-            class="flex-shrink-0 rounded px-1 py-0.5 text-[9px]"
-            :class="device.type === 'wireless' ? 'text-blue-500' : 'text-indigo-500'"
-          >
-            {{ device.type === 'wireless' ? 'Wi-Fi' : 'USB' }}
-          </span>
+          <BaseBadge
+            variant="blue"
+            :label="device.type === 'wireless' ? 'Wi-Fi' : 'USB'"
+          />
         </button>
 
         <div class="my-1 border-t border-black/8"></div>
@@ -65,7 +64,7 @@ const open = ref(false)
           class="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] text-black/50 transition-colors hover:bg-gray-100 hover:text-black/70"
           @click="emit('pairNew'); open = false"
         >
-          <Icon name="plus" class="h-3 w-3" />
+          <Icon icon="lucide:plus" class="h-3 w-3" />
           配对新设备
         </button>
       </PopoverContent>

@@ -22,6 +22,10 @@ pub struct DeviceInfo {
     pub screen_on: bool,
     pub device_name: String,
     pub charging: bool,
+    pub manufacturer: String,
+    pub model: String,
+    pub wifi_name: String,
+    pub memory: String,
 }
 
 #[tauri::command]
@@ -94,6 +98,41 @@ pub async fn get_device_info(serial: String) -> Result<DeviceInfo, String> {
         .trim().to_string();
     let display_name = if device_name.is_empty() { brand } else { format!("{} {}", brand, device_name) };
 
+    // Manufacturer
+    let manufacturer = run(vec!["shell", "getprop", "ro.product.manufacturer"])
+        .trim().to_string();
+
+    // Model
+    let model = run(vec!["shell", "getprop", "ro.product.model"])
+        .trim().to_string();
+
+    // Wi-Fi name (SSID)
+    let wifi_name = run(vec!["shell", "cmd", "wifi", "list-networks"])
+        .lines()
+        .find(|l| l.contains("CURRENT"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .unwrap_or("")
+        .to_string();
+
+    // Memory usage
+    let meminfo = run(vec!["shell", "cat", "/proc/meminfo"]);
+    let mem_total = meminfo.lines()
+        .find(|l| l.starts_with("MemTotal:"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mem_available = meminfo.lines()
+        .find(|l| l.starts_with("MemAvailable:"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mem_used = if mem_total > mem_available { mem_total - mem_available } else { 0 };
+    let memory = if mem_total > 0 {
+        format!("{:.1}/{:.1}G", mem_used as f64 / 1048576.0, mem_total as f64 / 1048576.0)
+    } else {
+        String::new()
+    };
+
     Ok(DeviceInfo {
         battery,
         storage: storage_str,
@@ -103,5 +142,9 @@ pub async fn get_device_info(serial: String) -> Result<DeviceInfo, String> {
         screen_on,
         device_name: display_name,
         charging,
+        manufacturer,
+        model,
+        wifi_name,
+        memory,
     })
 }

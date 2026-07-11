@@ -28,6 +28,12 @@ export interface Device {
   deviceName: string
   /** 是否正在充电 */
   charging: boolean
+  /** 制造商 */
+  manufacturer: string
+  /** Wi-Fi 名称 */
+  wifiName: string
+  /** 内存使用（格式：'已用/总量G'） */
+  memory: string
 }
 
 /**
@@ -117,7 +123,7 @@ async function fetchDeviceInfo(serial: string): Promise<Partial<Device>> {
   }
 
   // 并行执行所有 adb shell 命令，提升获取速度
-  const [batteryOut, storageOut, versionOut, sizeOut, ipOut, powerOut, nameOut, brandOut] =
+  const [batteryOut, storageOut, versionOut, sizeOut, ipOut, powerOut, nameOut, brandOut, manufacturerOut, modelOut, wifiOut, meminfoOut] =
     await Promise.all([
       run(['dumpsys', 'battery']), // 电池信息
       run(['df', '/data', '-h']), // 存储空间
@@ -126,7 +132,11 @@ async function fetchDeviceInfo(serial: string): Promise<Partial<Device>> {
       run(['ip', 'addr', 'show', 'wlan0']), // Wi-Fi IP 地址
       run(['dumpsys', 'power']), // 电源/屏幕状态
       run(['getprop', 'ro.product.marketname']), // 市场名称
-      run(['getprop', 'ro.product.brand']) // 品牌
+      run(['getprop', 'ro.product.brand']), // 品牌
+      run(['getprop', 'ro.product.manufacturer']), // 制造商
+      run(['getprop', 'ro.product.model']), // 型号
+      run(['dumpsys', 'wifi', 'interfaces']), // Wi-Fi 信息
+      run(['cat', '/proc/meminfo']) // 内存信息
     ])
 
   // 解析电池电量（dumpsys battery 输出中的 "level: 85" 格式）
@@ -166,6 +176,19 @@ async function fetchDeviceInfo(serial: string): Promise<Partial<Device>> {
       : marketName // 市场名已包含品牌（如 "Xiaomi 14"）
     : ''
 
+  // 解析 Wi-Fi 名称 (从 dumpsys wifi 获取当前 SSID)
+  const wifiName = wifiOut.match(/SSID:\s*"?([^"\n]+)"?/)?.[1]?.trim() || ''
+
+  // 解析内存使用
+  const memTotal = meminfoOut.match(/MemTotal:\s+(\d+)/)?.[1]
+  const memAvailable = meminfoOut.match(/MemAvailable:\s+(\d+)/)?.[1]
+  let memory = ''
+  if (memTotal && memAvailable) {
+    const total = parseInt(memTotal) / 1048576
+    const used = (parseInt(memTotal) - parseInt(memAvailable)) / 1048576
+    memory = `${used.toFixed(1)}/${total.toFixed(1)}G`
+  }
+
   return {
     battery,
     storage,
@@ -174,7 +197,11 @@ async function fetchDeviceInfo(serial: string): Promise<Partial<Device>> {
     ipAddress,
     screenOn,
     deviceName,
-    charging
+    charging,
+    manufacturer: manufacturerOut.trim(),
+    model: modelOut.trim(),
+    wifiName,
+    memory
   }
 }
 

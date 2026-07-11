@@ -47,6 +47,12 @@ function selectDevice(serial: string) {
 function pairNew() {
   currentSerial.value = ''
 }
+
+function handleDisconnect() {
+  if (currentDevice.value) {
+    disconnectDevice(currentDevice.value.serial)
+  }
+}
 </script>
 
 <template>
@@ -66,7 +72,7 @@ function pairNew() {
         :is-scrcpy-running="isScrcpyRunning"
         @start-scrcpy="startScrcpy"
         @stop-scrcpy="stopScrcpy"
-        @disconnect="disconnectDevice"
+        @disconnect="handleDisconnect"
       />
 
       <div class="flex">
